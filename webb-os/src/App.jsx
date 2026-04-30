@@ -289,6 +289,16 @@ button,input,textarea,select{font-family:inherit;}
 .scripture-card::before{content:'❝';position:absolute;top:-4px;left:12px;font-size:48px;color:#BFDBFE;line-height:1;font-family:Georgia,serif;}
 .scripture-verse{font-size:14px;font-weight:500;color:#1D4ED8;line-height:1.65;padding-left:8px;font-style:italic;}
 .scripture-ref{font-size:11px;font-weight:800;color:#3B82F6;margin-top:8px;letter-spacing:0.06em;text-transform:uppercase;}
+.todo-input-row{display:flex;gap:10px;margin-bottom:10px;}
+.todo-input{flex:1;background:#fff;border:1.5px solid #E2E8F0;border-radius:14px;padding:13px 16px;font-size:15px;color:#0B1929;outline:none;transition:all 0.2s;}
+.todo-input::placeholder{color:#CBD5E1;}
+.todo-input:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,0.08);}
+.todo-add-btn{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#1A3A6B,#2563EB);border:none;color:#fff;font-size:24px;font-weight:300;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 10px rgba(37,99,235,0.3);}
+.todo-circle{width:24px;height:24px;border-radius:50%;border:2px solid #CBD5E1;flex-shrink:0;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;}
+.todo-circle.done{background:linear-gradient(135deg,#059669,#34D399);border-color:transparent;}
+.todo-circle.done::after{content:'✓';color:#fff;font-size:11px;font-weight:800;}
+.todo-del{background:none;border:none;color:#CBD5E1;font-size:20px;cursor:pointer;padding:4px;line-height:1;transition:color 0.15s;flex-shrink:0;}
+.todo-del:hover{color:#94A3B8;}
 .prompt-card{background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #BFDBFE;border-radius:18px;padding:15px 17px;margin-bottom:12px;display:flex;align-items:center;gap:13px;cursor:pointer;transition:all 0.2s;}
 .prompt-card:active{transform:scale(0.98);}
 .prompt-icon{font-size:26px;flex-shrink:0;}
@@ -515,6 +525,7 @@ export default function App() {
   const [showTM,     setShowTM]     = useState(false);
   const [tempDest,   setTempDest]   = useState("");
   const [tripLog,    setTripLog]    = useState([]);
+  const [todos,      setTodos]      = useState([]);
   const [daily,     setDaily]     = useState({});
   const [weekly,    setWeekly]    = useState({});
   const [monthly,   setMonthly]   = useState({});
@@ -558,6 +569,7 @@ export default function App() {
           load("wb-trips-v1"),
           load("wb-travel-mode"),
           load("wb-travel-dest"),
+          load("wb-todos-v1"),
         ]);
         if(d)setDaily(d); if(w)setWeekly(w); if(m)setMonthly(m); if(a)setAnnual(a);
         if(ij)setIjm(ij); if(td)setTravelDaily(td); if(tw)setTravelWeekly(tw);
@@ -566,6 +578,7 @@ export default function App() {
         if(fin)setFinancials(fin); if(xp)setTotalXP(xp); if(s)setStreaks(s);
         if(ach)setUnlockedAch(ach); if(tl)setTripLog(tl);
         if(tm)setTravelMode(tm); if(dest)setTravelDest(dest);
+        const tod=await load("wb-todos-v1"); if(tod)setTodos(tod);
       } catch(e) { console.error("Load error:", e); }
       setLoading(false);
     }
@@ -715,6 +728,54 @@ export default function App() {
   const levelInfo=getLevelInfo(totalXP);
   const filteredGoals=domainFilter==="all"?goals:goals.filter(g=>g.domain===domainFilter);
 
+
+  function TodoList({todos, setTodos}) {
+    const [input, setInput] = useState("");
+    async function addTodo(){
+      if(!input.trim())return;
+      const updated=[...todos,{id:`t-${Date.now()}`,text:input.trim(),done:false}];
+      setTodos(updated);await save("wb-todos-v1",updated);setInput("");
+    }
+    async function toggleTodo(id){
+      const updated=todos.map(t=>t.id===id?{...t,done:!t.done}:t);
+      setTodos(updated);await save("wb-todos-v1",updated);
+    }
+    async function deleteTodo(id){
+      const updated=todos.filter(t=>t.id!==id);
+      setTodos(updated);await save("wb-todos-v1",updated);
+    }
+    async function clearDone(){
+      const updated=todos.filter(t=>!t.done);
+      setTodos(updated);await save("wb-todos-v1",updated);
+    }
+    const doneCount=todos.filter(t=>t.done).length;
+    return(
+      <div style={{marginBottom:24}}>
+        <div className="sec" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <div><div className="sec-title">Today's Tasks</div>{doneCount>0&&<div className="sec-sub">{doneCount} of {todos.length} done</div>}</div>
+          {doneCount>0&&<button onClick={clearDone} style={{background:"none",border:"none",fontSize:11,fontWeight:700,color:"#94A3B8",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Clear done</button>}
+        </div>
+        <div className="todo-input-row">
+          <input className="todo-input" placeholder="Add a task…" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTodo()}/>
+          <button className="todo-add-btn" onClick={addTodo}>+</button>
+        </div>
+        {todos.length>0&&(
+          <div className="check-card">
+            {todos.map(todo=>(
+              <div key={todo.id} className="c-row">
+                <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
+                <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
+                  <div className="c-main" style={{color:todo.done?"#CBD5E1":"#0B1929",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
+                </div>
+                <button className="todo-del" onClick={()=>deleteTodo(todo.id)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function CheckGroup({items,state,type,travel=false}){
     return(
       <div className="check-card">
@@ -818,6 +879,7 @@ export default function App() {
               </div>
               <div className="sec"><div className="sec-title">{travelMode?"Travel Daily":"Daily"}</div></div>
               <CheckGroup items={CL.daily} state={curDaily} type="daily" travel={travelMode}/>
+              <TodoList todos={todos} setTodos={setTodos}/>
             </>
           )}
 
