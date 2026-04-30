@@ -145,6 +145,67 @@ function summerDaysLeft(){const n=new Date(),s=new Date(n.getFullYear(),5,21);if
 function formatDate(){return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});}
 function formatShort(iso){return new Date(iso).toLocaleDateString("en-US",{month:"short",day:"numeric"});}
 
+// ── DAILY SCRIPTURE ───────────────────────────────────────────────────
+const SCRIPTURES = [
+  { verse:"For I know the plans I have for you, declares the Lord, plans to prosper you and not to harm you, plans to give you hope and a future.", ref:"Jeremiah 29:11" },
+  { verse:"I can do all this through him who gives me strength.", ref:"Philippians 4:13" },
+  { verse:"The Lord is my shepherd, I lack nothing.", ref:"Psalm 23:1" },
+  { verse:"Trust in the Lord with all your heart and lean not on your own understanding.", ref:"Proverbs 3:5" },
+  { verse:"Be strong and courageous. Do not be afraid; do not be discouraged, for the Lord your God will be with you wherever you go.", ref:"Joshua 1:9" },
+  { verse:"And we know that in all things God works for the good of those who love him.", ref:"Romans 8:28" },
+  { verse:"The Lord is my light and my salvation — whom shall I fear?", ref:"Psalm 27:1" },
+  { verse:"Come to me, all you who are weary and burdened, and I will give you rest.", ref:"Matthew 11:28" },
+  { verse:"Do not be anxious about anything, but in every situation, by prayer and petition, with thanksgiving, present your requests to God.", ref:"Philippians 4:6" },
+  { verse:"He gives strength to the weary and increases the power of the weak.", ref:"Isaiah 40:29" },
+  { verse:"But seek first his kingdom and his righteousness, and all these things will be given to you as well.", ref:"Matthew 6:33" },
+  { verse:"The joy of the Lord is your strength.", ref:"Nehemiah 8:10" },
+  { verse:"Cast all your anxiety on him because he cares for you.", ref:"1 Peter 5:7" },
+  { verse:"Those who hope in the Lord will renew their strength. They will soar on wings like eagles.", ref:"Isaiah 40:31" },
+  { verse:"Be still and know that I am God.", ref:"Psalm 46:10" },
+  { verse:"The steadfast love of the Lord never ceases; his mercies never come to an end.", ref:"Lamentations 3:22–23" },
+  { verse:"Whatever you do, work at it with all your heart, as working for the Lord.", ref:"Colossians 3:23" },
+  { verse:"No, in all these things we are more than conquerors through him who loved us.", ref:"Romans 8:37" },
+  { verse:"I praise you because I am fearfully and wonderfully made.", ref:"Psalm 139:14" },
+  { verse:"The Lord bless you and keep you; the Lord make his face shine on you.", ref:"Numbers 6:24–25" },
+  { verse:"If God is for us, who can be against us?", ref:"Romans 8:31" },
+  { verse:"Blessed is the one who trusts in the Lord, whose confidence is in him.", ref:"Jeremiah 17:7" },
+  { verse:"So do not fear, for I am with you; do not be dismayed, for I am your God. I will strengthen you and help you.", ref:"Isaiah 41:10" },
+  { verse:"My grace is sufficient for you, for my power is made perfect in weakness.", ref:"2 Corinthians 12:9" },
+  { verse:"He who began a good work in you will carry it on to completion.", ref:"Philippians 1:6" },
+  { verse:"The Lord is close to the brokenhearted and saves those who are crushed in spirit.", ref:"Psalm 34:18" },
+  { verse:"Commit to the Lord whatever you do, and he will establish your plans.", ref:"Proverbs 16:3" },
+  { verse:"Now to him who is able to do immeasurably more than all we ask or imagine.", ref:"Ephesians 3:20" },
+  { verse:"Your word is a lamp for my feet, a light on my path.", ref:"Psalm 119:105" },
+  { verse:"This is the day the Lord has made; let us rejoice and be glad in it.", ref:"Psalm 118:24" },
+  { verse:"For the Spirit God gave us does not make us timid, but gives us power, love and self-discipline.", ref:"2 Timothy 1:7" },
+  { verse:"The Lord is my rock, my fortress and my deliverer.", ref:"Psalm 18:2" },
+  { verse:"You will keep in perfect peace those whose minds are steadfast, because they trust in you.", ref:"Isaiah 26:3" },
+  { verse:"God is our refuge and strength, an ever-present help in trouble.", ref:"Psalm 46:1" },
+  { verse:"Draw near to God and he will draw near to you.", ref:"James 4:8" },
+  { verse:"Set your minds on things above, not on earthly things.", ref:"Colossians 3:2" },
+  { verse:"He restores my soul. He leads me in paths of righteousness for his name's sake.", ref:"Psalm 23:3" },
+  { verse:"The Lord is faithful, and he will strengthen you and protect you.", ref:"2 Thessalonians 3:3" },
+  { verse:"Delight yourself in the Lord and he will give you the desires of your heart.", ref:"Psalm 37:4" },
+  { verse:"And the peace of God, which transcends all understanding, will guard your hearts and your minds.", ref:"Philippians 4:7" },
+  { verse:"The Lord makes firm the steps of the one who delights in him.", ref:"Psalm 37:23" },
+  { verse:"Every good and perfect gift is from above, coming down from the Father of the heavenly lights.", ref:"James 1:17" },
+  { verse:"Taste and see that the Lord is good; blessed is the one who takes refuge in him.", ref:"Psalm 34:8" },
+  { verse:"Let the morning bring me word of your unfailing love, for I have put my trust in you.", ref:"Psalm 143:8" },
+  { verse:"For the Lord is good and his love endures forever; his faithfulness continues through all generations.", ref:"Psalm 100:5" },
+  { verse:"Surely goodness and love will follow me all the days of my life.", ref:"Psalm 23:6" },
+  { verse:"Great is the Lord and most worthy of praise; his greatness no one can fathom.", ref:"Psalm 145:3" },
+  { verse:"Ask and it will be given to you; seek and you will find; knock and the door will be opened to you.", ref:"Matthew 7:7" },
+  { verse:"For God so loved the world that he gave his one and only Son.", ref:"John 3:16" },
+  { verse:"I am the vine; you are the branches. If you remain in me and I in you, you will bear much fruit.", ref:"John 15:5" },
+  { verse:"The Lord your God is with you, the Mighty Warrior who saves. He will take great delight in you.", ref:"Zephaniah 3:17" },
+];
+
+function getDailyScripture() {
+  const start = new Date(new Date().getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((new Date() - start) / 864e5);
+  return SCRIPTURES[dayOfYear % SCRIPTURES.length];
+}
+
 // ── CONFETTI + XP FLOAT ──────────────────────────────────────────────
 function Confetti() {
   const pieces=Array.from({length:60},(_,i)=>({id:i,x:Math.random()*100,color:["#2563EB","#60A5FA","#F59E0B","#34D399","#A78BFA","#FBBF24"][Math.floor(Math.random()*6)],size:Math.random()*8+4,delay:Math.random()*0.8,duration:Math.random()*1.5+1.5}));
@@ -174,7 +235,7 @@ button,input,textarea,select{font-family:inherit;}
 @keyframes glow{0%,100%{opacity:0.6;}50%{opacity:1;}}
 @keyframes slideInLeft{from{opacity:0;transform:translateX(-20px);}to{opacity:1;transform:translateX(0);}}
 @keyframes fadeOut{to{opacity:0;transform:translateX(-50%) translateY(-6px);}}
-.hdr{background:rgba(255,255,255,0.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(11,25,41,0.07);padding:14px 18px 12px;position:sticky;top:0;z-index:50;}
+.hdr{background:rgba(255,255,255,0.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(11,25,41,0.07);padding:calc(14px + env(safe-area-inset-top)) 18px 12px;position:sticky;top:0;z-index:50;}
 .hdr-inner{display:flex;align-items:center;justify-content:space-between;}
 .hdr-eyebrow{font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#2563EB;margin-bottom:1px;}
 .hdr-date{font-size:20px;font-weight:800;color:#0B1929;letter-spacing:-0.03em;line-height:1.1;}
@@ -224,6 +285,10 @@ button,input,textarea,select{font-family:inherit;}
 .sec{margin:22px 0 10px;}
 .sec-title{font-size:21px;font-weight:800;color:#0B1929;letter-spacing:-0.03em;}
 .sec-sub{font-size:13px;color:#64748B;margin-top:2px;}
+.scripture-card{background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1px solid #BFDBFE;border-radius:18px;padding:16px 18px;margin-bottom:12px;position:relative;overflow:hidden;}
+.scripture-card::before{content:'❝';position:absolute;top:-4px;left:12px;font-size:48px;color:#BFDBFE;line-height:1;font-family:Georgia,serif;}
+.scripture-verse{font-size:14px;font-weight:500;color:#1D4ED8;line-height:1.65;padding-left:8px;font-style:italic;}
+.scripture-ref{font-size:11px;font-weight:800;color:#3B82F6;margin-top:8px;letter-spacing:0.06em;text-transform:uppercase;}
 .prompt-card{background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #BFDBFE;border-radius:18px;padding:15px 17px;margin-bottom:12px;display:flex;align-items:center;gap:13px;cursor:pointer;transition:all 0.2s;}
 .prompt-card:active{transform:scale(0.98);}
 .prompt-icon{font-size:26px;flex-shrink:0;}
@@ -742,6 +807,7 @@ export default function App() {
                 <div className="xp-track"><div className="xp-fill" style={{width:`${levelInfo.progress}%`}}/></div>
               </div>
               {travelMode&&<div className="travel-badge"><span style={{fontSize:18}}>🗺️</span><div><div className="tb-dest">{travelDest}</div><div className="tb-sub">Travel checklist active</div></div></div>}
+              {(()=>{const s=getDailyScripture();return(<div className="scripture-card"><div className="scripture-verse">{s.verse}</div><div className="scripture-ref">{s.ref}</div></div>);})()}
               <div className="prompt-card">
                 <div className="prompt-icon">{travelMode?"🌍":"✨"}</div>
                 <div className="prompt-body">
