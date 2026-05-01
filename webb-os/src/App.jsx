@@ -663,7 +663,6 @@ export default function App() {
         if(ach)setUnlockedAch(ach); if(tl)setTripLog(tl);
         if(tm)setTravelMode(tm); if(dest)setTravelDest(dest);
         const tod=await load("wb-todos-v1"); if(tod)setTodos(tod);
-        const hist=load(`wb-history-${yearKey()}`);
         const wp=await load(`wb-weekplan-${weekKey()}`); if(wp)setWeekPlan(wp);
         const jrnl=await load(`wb-journal-${yearKey()}`); if(jrnl){setJournal(jrnl);setJournalInput(jrnl[todayKey()]||"");}
         const hist=await load(`wb-history-${yearKey()}`); if(hist)setHistory(hist);
