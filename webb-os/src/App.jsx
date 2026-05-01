@@ -357,6 +357,19 @@ button,input,textarea,select{font-family:inherit;}
 .yearmap-grid{display:flex;flex-wrap:wrap;gap:4px;}
 .yearmap-cell{width:28px;height:28px;border-radius:7px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:rgba(255,255,255,0.8);}
 .yearmap-close{width:100%;padding:15px;background:#F0F4FA;border:none;border-radius:14px;color:#64748B;font-size:15px;font-weight:700;cursor:pointer;margin-top:16px;}
+.journal-input{width:100%;background:#fff;border:1.5px solid #E2E8F0;border-radius:18px;padding:16px 18px;font-size:15px;color:#0B1929;outline:none;resize:none;transition:all 0.2s;line-height:1.65;margin-bottom:0;}
+.journal-input::placeholder{color:#CBD5E1;line-height:1.65;}
+.journal-input:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,0.08);}
+.journal-entry-card{background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 2px 12px rgba(11,25,41,0.06);margin-bottom:10px;border-left:3px solid #BFDBFE;}
+.journal-entry-date{font-size:11px;font-weight:800;color:#3B82F6;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;}
+.journal-entry-text{font-size:13px;color:#64748B;line-height:1.65;font-style:italic;}
+.plan-card{background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 2px 16px rgba(11,25,41,0.07);margin-bottom:16px;}
+.plan-priority-row{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid #F1F5F9;}
+.plan-priority-row:last-child{border-bottom:none;}
+.plan-num{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#1A3A6B,#2563EB);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;flex-shrink:0;}
+.plan-input{flex:1;border:none;outline:none;font-size:15px;font-weight:500;color:#0B1929;background:transparent;}
+.plan-input::placeholder{color:#CBD5E1;font-weight:400;}
+
 
 .prompt-card{background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #BFDBFE;border-radius:18px;padding:15px 17px;margin-bottom:12px;display:flex;align-items:center;gap:13px;cursor:pointer;transition:all 0.2s;}
 .prompt-card:active{transform:scale(0.98);}
@@ -585,6 +598,14 @@ export default function App() {
   const [tempDest,   setTempDest]   = useState("");
   const [tripLog,    setTripLog]    = useState([]);
   const [todos,      setTodos]      = useState([]);
+  // Weekly planner
+  const [weekPlan,   setWeekPlan]   = useState({top3:["","",""],intention:"",gratitude:""});
+  // Prayer journal
+  const [journal,    setJournal]    = useState({});   // {dateStr: text}
+  const [journalInput,setJournalInput] = useState("");
+  // Goal editing
+  const [editingGoal,setEditingGoal] = useState(null); // goal id being edited
+  const [editGoalData,setEditGoalData] = useState({});
   const [history,    setHistory]    = useState({});       // {dateStr: {dailyPct, items}}
   const [viewDate,   setViewDate]   = useState(null);     // null = today, string = past date
   const [historyDay, setHistoryDay] = useState(null);     // loaded data for viewDate
@@ -642,6 +663,9 @@ export default function App() {
         if(ach)setUnlockedAch(ach); if(tl)setTripLog(tl);
         if(tm)setTravelMode(tm); if(dest)setTravelDest(dest);
         const tod=await load("wb-todos-v1"); if(tod)setTodos(tod);
+        const hist=load(`wb-history-${yearKey()}`);
+        const wp=await load(`wb-weekplan-${weekKey()}`); if(wp)setWeekPlan(wp);
+        const jrnl=await load(`wb-journal-${yearKey()}`); if(jrnl){setJournal(jrnl);setJournalInput(jrnl[todayKey()]||"");}
         const hist=await load(`wb-history-${yearKey()}`); if(hist)setHistory(hist);
       } catch(e) { console.error("Load error:", e); }
       setLoading(false);
@@ -793,6 +817,36 @@ export default function App() {
   function updateGoalProgress(id,progress){const u=goals.map(g=>g.id===id?{...g,progress}:g);setGoals(u);}
   async function saveGoalProgress(){await save("wb-goals-v4",goals);}
   async function updateGoalNote(id,notes){const u=goals.map(g=>g.id===id?{...g,notes}:g);setGoals(u);await save("wb-goals-v4",u);}
+
+  async function saveWeekPlan(updated) {
+    setWeekPlan(updated);
+    await save(`wb-weekplan-${weekKey()}`, updated);
+  }
+
+  async function saveJournalEntry(text) {
+    setJournalInput(text);
+    const updated = {...journal, [todayKey()]: text};
+    setJournal(updated);
+    await save(`wb-journal-${yearKey()}`, updated);
+  }
+
+  async function startEditGoal(g) {
+    setEditingGoal(g.id);
+    setEditGoalData({title:g.title, detail:g.detail, target:g.target, domain:g.domain});
+  }
+
+  async function saveEditGoal() {
+    const updated = goals.map(g => g.id===editingGoal ? {...g,...editGoalData} : g);
+    setGoals(updated);
+    await save("wb-goals-v4", updated);
+    setEditingGoal(null);
+  }
+
+  async function deleteGoal(id) {
+    const updated = goals.filter(g => g.id!==id);
+    setGoals(updated);
+    await save("wb-goals-v4", updated);
+  }
 
   async function addGoal(){
     if(!newGoal.title.trim())return;
@@ -1359,7 +1413,24 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <div className="sec"><div className="sec-title">Goals</div></div>
+              <div className="sec" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div className="sec-title">Goals</div>
+                <button onClick={()=>setShowAGF(p=>!p)} style={{background:"none",border:"none",fontSize:13,fontWeight:700,color:"#2563EB",cursor:"pointer"}}>
+                  {showAddGoalForm?"Cancel":"+ Add"}
+                </button>
+              </div>
+              {showAddGoalForm&&(
+                <div className="add-form">
+                  <div className="add-title">New Goal</div>
+                  <input className="field" placeholder="Goal title…" value={newGoal.title} onChange={e=>setNewGoal(p=>({...p,title:e.target.value}))}/>
+                  <input className="field" placeholder="Details…" value={newGoal.detail} onChange={e=>setNewGoal(p=>({...p,detail:e.target.value}))}/>
+                  <input className="field" placeholder="Target (e.g. Q3 2026)…" value={newGoal.target} onChange={e=>setNewGoal(p=>({...p,target:e.target.value}))}/>
+                  <select className="field" value={newGoal.domain} onChange={e=>setNewGoal(p=>({...p,domain:e.target.value}))}>
+                    {Object.entries(DOMAIN_CFG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                  <div className="btn-row"><button className="btn-s" onClick={()=>setShowAGF(false)}>Cancel</button><button className="btn-p" onClick={addGoal}>Add</button></div>
+                </div>
+              )}
               <div className="chips">
                 {[["all","All"],["family","Family"],["platform","Platform"],["financial","Financial"],["health","Health"]].map(([k,l])=>(
                   <button key={k} className={`chip ${domainFilter===k?"active":""}`} style={{"--cc":k==="all"?"#2563EB":DOMAIN_CFG[k]?.color}} onClick={()=>setDomFilter(k)}>{l}</button>
@@ -1367,34 +1438,50 @@ export default function App() {
               </div>
               {filteredGoals.map(g=>{
                 const dc=DOMAIN_CFG[g.domain];
+                const isEditing = editingGoal===g.id;
                 return(
                   <div key={g.id} className={`g-card ${g.completed?"complete":""}`}>
-                    <div className="g-hdr"><div className="g-dot" style={{background:dc.color}}/><div className="g-title">{g.title}</div><button className={`g-done ${g.completed?"done":""}`} onClick={()=>toggleGoalDone(g.id)}>✓</button></div>
-                    <div className="g-detail">{g.detail}</div>
-                    <div className="g-tag" style={{background:`${dc.color}18`,color:dc.color}}>Target: {g.target}</div>
-                    {!g.completed&&(
+                    {isEditing ? (
                       <>
-                        <div className="g-prog-row"><div className="g-prog-track"><div className="g-prog-fill" style={{width:`${g.progress}%`,background:dc.color}}/></div><div className="g-prog-pct">{g.progress}%</div></div>
-                        <input type="range" className="g-slider" min={0} max={100} value={g.progress} onChange={e=>updateGoalProgress(g.id,parseInt(e.target.value))} onMouseUp={saveGoalProgress} onTouchEnd={saveGoalProgress}/>
-                        <textarea className="g-note" rows={2} placeholder="Add a note…" value={g.notes||""} onChange={e=>updateGoalNote(g.id,e.target.value)}/>
+                        <div className="add-title" style={{fontSize:15,marginBottom:12}}>Edit Goal</div>
+                        <input className="field" value={editGoalData.title} onChange={e=>setEditGoalData(p=>({...p,title:e.target.value}))} placeholder="Title…"/>
+                        <input className="field" value={editGoalData.detail} onChange={e=>setEditGoalData(p=>({...p,detail:e.target.value}))} placeholder="Details…"/>
+                        <input className="field" value={editGoalData.target} onChange={e=>setEditGoalData(p=>({...p,target:e.target.value}))} placeholder="Target…"/>
+                        <select className="field" value={editGoalData.domain} onChange={e=>setEditGoalData(p=>({...p,domain:e.target.value}))}>
+                          {Object.entries(DOMAIN_CFG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                        </select>
+                        <div className="btn-row">
+                          <button className="btn-s" onClick={()=>setEditingGoal(null)}>Cancel</button>
+                          <button className="btn-p" onClick={saveEditGoal}>Save</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="g-hdr">
+                          <div className="g-dot" style={{background:dc.color}}/>
+                          <div className="g-title">{g.title}</div>
+                          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                            <button onClick={()=>startEditGoal(g)} style={{background:"none",border:"none",fontSize:13,color:"#94A3B8",cursor:"pointer",fontWeight:700}}>Edit</button>
+                            <button className={`g-done ${g.completed?"done":""}`} onClick={()=>toggleGoalDone(g.id)}>✓</button>
+                          </div>
+                        </div>
+                        <div className="g-detail">{g.detail}</div>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                          <div className="g-tag" style={{background:`${dc.color}18`,color:dc.color,marginBottom:0}}>Target: {g.target}</div>
+                          <button onClick={()=>deleteGoal(g.id)} style={{background:"none",border:"none",fontSize:11,fontWeight:700,color:"#EF4444",cursor:"pointer",letterSpacing:"0.04em"}}>DELETE</button>
+                        </div>
+                        {!g.completed&&(
+                          <>
+                            <div className="g-prog-row"><div className="g-prog-track"><div className="g-prog-fill" style={{width:`${g.progress}%`,background:dc.color}}/></div><div className="g-prog-pct">{g.progress}%</div></div>
+                            <input type="range" className="g-slider" min={0} max={100} value={g.progress} onChange={e=>updateGoalProgress(g.id,parseInt(e.target.value))} onMouseUp={saveGoalProgress} onTouchEnd={saveGoalProgress}/>
+                            <textarea className="g-note" rows={2} placeholder="Add a note…" value={g.notes||""} onChange={e=>updateGoalNote(g.id,e.target.value)}/>
+                          </>
+                        )}
                       </>
                     )}
                   </div>
                 );
               })}
-              {showAddGoalForm&&(
-                <div className="add-form">
-                  <div className="add-title">New Goal</div>
-                  <input className="field" placeholder="Goal title…" value={newGoal.title} onChange={e=>setNewGoal(p=>({...p,title:e.target.value}))}/>
-                  <input className="field" placeholder="Details…" value={newGoal.detail} onChange={e=>setNewGoal(p=>({...p,detail:e.target.value}))}/>
-                  <input className="field" placeholder="Target…" value={newGoal.target} onChange={e=>setNewGoal(p=>({...p,target:e.target.value}))}/>
-                  <select className="field" value={newGoal.domain} onChange={e=>setNewGoal(p=>({...p,domain:e.target.value}))}>
-                    {Object.entries(DOMAIN_CFG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                  </select>
-                  <div className="btn-row"><button className="btn-s" onClick={()=>setShowAGF(false)}>Cancel</button><button className="btn-p" onClick={addGoal}>Add Goal</button></div>
-                </div>
-              )}
-              <button className="fab" onClick={()=>setShowAGF(p=>!p)}>{showAddGoalForm?"×":"+"}</button>
             </>
           )}
 
@@ -1405,12 +1492,7 @@ export default function App() {
                 <div className="q-text">"Really chasing the Lord means great sacrifice but great outcomes — encouraging others to dream and live a life less ordinary."</div>
                 <div className="q-attr">Ben Webb</div>
               </div>
-              <div className="sec"><div className="sec-title">AI Coach</div></div>
-              <div className="insight-card">
-                {insightText?<div className="i-body">{insightText}</div>:<div className="i-placeholder">Personalised coaching based on your live data — streaks, goals, music, financial tracking, travel, and where you're slipping.</div>}
-                {insightLoad&&<div style={{textAlign:"center",padding:"14px 0",color:"#94A3B8",fontSize:14}}>Analysing your data…</div>}
-              </div>
-              <button className="coach-btn" disabled={insightLoad} onClick={getInsights}>{insightLoad?"Thinking…":insightText?"Refresh Coaching":"Get Coaching Insights"}</button>
+
               <div className="sec"><div className="sec-title">The Five Tenets</div></div>
               <div className="vision-card">
                 {[["Stewardship","Care for what God entrusted: health, family, finances, talent, platform."],["Service","Act humbly. IJM. Family presence. Platform for others."],["Scale","Build and multiply. Legacy for children. Platform that outlasts the role."],["Sweat","Work hard. God-honoring things face natural resistance."],["Sabbath","Three Sundays per month minimum. Rest in sovereignty."]].map(([n,d])=>(
@@ -1426,7 +1508,7 @@ export default function App() {
         </div>
 
         <div className="bottom-nav">
-          {[{id:"today",icon:"☑️",lbl:"Today"},{id:"rhythms",icon:"🔄",lbl:"Rhythms"},{id:"music",icon:"🎸",lbl:"Music"},{id:"progress",icon:"📈",lbl:"Progress"},{id:"insights",icon:"💡",lbl:"Insights"}].map(n=>(
+          {[{id:"today",icon:"☑️",lbl:"Today"},{id:"rhythms",icon:"🔄",lbl:"Rhythms"},{id:"planner",icon:"📋",lbl:"Plan"},{id:"progress",icon:"📈",lbl:"Progress"},{id:"insights",icon:"🕊️",lbl:"Journal"}].map(n=>(
             <button key={n.id} className={`nav-btn ${tab===n.id?"active":""} ${tab===n.id&&travelMode?"travel":""}`} onClick={()=>setTab(n.id)}>
               <div className="nav-icon">{n.icon}</div>
               <div className="nav-lbl">{n.lbl}</div>
