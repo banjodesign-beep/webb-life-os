@@ -130,10 +130,31 @@ const DOMAIN_CFG = {
 };
 
 // ── HELPERS ───────────────────────────────────────────────────────────
-const todayKey   = () => new Date().toISOString().split("T")[0];
+// Use local date to avoid UTC midnight timezone issues
+const localDateStr = (d=new Date()) => {
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+};
+const todayKey   = () => localDateStr();
 const monthKey   = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
 const yearKey    = () => `${new Date().getFullYear()}`;
 const weekKey    = () => { const d=new Date(),j=new Date(d.getFullYear(),0,1),w=Math.ceil((((d-j)/864e5)+j.getDay()+1)/7); return `${d.getFullYear()}-W${String(w).padStart(2,"0")}`; };
+
+function getPastDays(n) {
+  const days = [];
+  for(let i=n-1; i>=0; i--) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    days.push(localDateStr(d));
+  }
+  return days;
+}
+
+function getYearDays() {
+  const days = []; const today = new Date();
+  const start = new Date(today.getFullYear(),0,1);
+  while(start <= today) { days.push(localDateStr(new Date(start))); start.setDate(start.getDate()+1); }
+  return days;
+}
 
 function getLevelInfo(xp) {
   const T=[{l:1,max:149,t:"Getting Started"},{l:2,max:349,t:"Building Rhythm"},{l:3,max:699,t:"Gaining Momentum"},{l:4,max:1249,t:"In the Flow"},{l:5,max:2499,t:"Man After God's Heart"},{l:6,max:Infinity,t:"Legacy Builder"}];
@@ -299,6 +320,44 @@ button,input,textarea,select{font-family:inherit;}
 .todo-circle.done::after{content:'✓';color:#fff;font-size:11px;font-weight:800;}
 .todo-del{background:none;border:none;color:#CBD5E1;font-size:20px;cursor:pointer;padding:4px;line-height:1;transition:color 0.15s;flex-shrink:0;}
 .todo-del:hover{color:#94A3B8;}
+.date-strip-wrap{position:relative;margin-bottom:14px;}
+.date-strip{display:flex;gap:6px;overflow-x:auto;padding:4px 2px 8px;scrollbar-width:none;}
+.date-strip::-webkit-scrollbar{display:none;}
+.day-chip{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;flex-shrink:0;width:44px;}
+.day-chip-inner{width:44px;height:56px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:2px solid transparent;transition:all 0.15s;background:#fff;}
+.day-chip-inner.today{border-color:#2563EB;background:#EFF6FF;}
+.day-chip-inner.viewing{border-color:#F59E0B;background:#FEF3C7;}
+.day-chip-dow{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#94A3B8;}
+.day-chip-num{font-size:16px;font-weight:800;color:#0B1929;line-height:1;}
+.day-chip-inner.today .day-chip-dow{color:#2563EB;}
+.day-chip-inner.today .day-chip-num{color:#2563EB;}
+.day-chip-inner.viewing .day-chip-num{color:#B45309;}
+.day-dot{width:6px;height:6px;border-radius:50%;margin-top:1px;}
+.dot-empty{background:#E2E8F0;}
+.dot-full{background:#059669;}
+.dot-good{background:#34D399;}
+.dot-partial{background:#F59E0B;}
+.dot-low{background:#EF4444;}
+.history-banner{background:linear-gradient(135deg,#FEF3C7,#FDE68A);border:1px solid #FCD34D;border-radius:14px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.history-banner-text{font-size:13px;font-weight:700;color:#92400E;}
+.history-banner-btn{font-size:12px;font-weight:800;color:#B45309;background:none;border:none;cursor:pointer;letter-spacing:0.04em;}
+.history-item{display:flex;align-items:center;gap:13px;padding:14px 18px;border-bottom:1px solid #F1F5F9;}
+.history-item:last-child{border-bottom:none;}
+.history-check{width:24px;height:24px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.history-check.done{background:linear-gradient(135deg,#059669,#34D399);}
+.history-check.missed{background:#F1F5F9;}
+.history-check.done::after{content:"✓";color:#fff;font-size:11px;font-weight:800;}
+.history-check.missed::after{content:"✗";color:#CBD5E1;font-size:11px;font-weight:700;}
+.yearmap-overlay{position:fixed;inset:0;background:rgba(11,25,41,0.6);z-index:200;display:flex;align-items:flex-end;}
+.yearmap-sheet{background:#fff;border-radius:24px 24px 0 0;padding:24px 20px 40px;width:100%;max-height:80vh;overflow-y:auto;}
+.yearmap-title{font-size:20px;font-weight:800;color:#0B1929;margin-bottom:4px;letter-spacing:-0.02em;}
+.yearmap-sub{font-size:13px;color:#64748B;margin-bottom:20px;}
+.yearmap-months{display:flex;flex-direction:column;gap:14px;}
+.yearmap-month-label{font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;}
+.yearmap-grid{display:flex;flex-wrap:wrap;gap:4px;}
+.yearmap-cell{width:28px;height:28px;border-radius:7px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:rgba(255,255,255,0.8);}
+.yearmap-close{width:100%;padding:15px;background:#F0F4FA;border:none;border-radius:14px;color:#64748B;font-size:15px;font-weight:700;cursor:pointer;margin-top:16px;}
+
 .prompt-card{background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #BFDBFE;border-radius:18px;padding:15px 17px;margin-bottom:12px;display:flex;align-items:center;gap:13px;cursor:pointer;transition:all 0.2s;}
 .prompt-card:active{transform:scale(0.98);}
 .prompt-icon{font-size:26px;flex-shrink:0;}
@@ -526,6 +585,10 @@ export default function App() {
   const [tempDest,   setTempDest]   = useState("");
   const [tripLog,    setTripLog]    = useState([]);
   const [todos,      setTodos]      = useState([]);
+  const [history,    setHistory]    = useState({});       // {dateStr: {dailyPct, items}}
+  const [viewDate,   setViewDate]   = useState(null);     // null = today, string = past date
+  const [historyDay, setHistoryDay] = useState(null);     // loaded data for viewDate
+  const [showYearMap,setShowYearMap]= useState(false);
   const [daily,     setDaily]     = useState({});
   const [weekly,    setWeekly]    = useState({});
   const [monthly,   setMonthly]   = useState({});
@@ -579,6 +642,7 @@ export default function App() {
         if(ach)setUnlockedAch(ach); if(tl)setTripLog(tl);
         if(tm)setTravelMode(tm); if(dest)setTravelDest(dest);
         const tod=await load("wb-todos-v1"); if(tod)setTodos(tod);
+        const hist=await load(`wb-history-${yearKey()}`); if(hist)setHistory(hist);
       } catch(e) { console.error("Load error:", e); }
       setLoading(false);
     }
@@ -641,9 +705,10 @@ export default function App() {
     await save("wb-totalxp",nxp);
     if(nowChecked){setBouncing(id);setTimeout(()=>setBouncing(null),450);setXpFloat(item.xp);setTimeout(()=>setXpFloat(null),1300);}
     if(type==="daily"&&!travelMode){
+      await writeHistory(ns);
       const ac=CHECKLIST_HOME.daily.every(i=>(i.id===id?nowChecked:ns[i.id]?.checked));
       if(ac){
-        const today=todayKey(),y=new Date();y.setDate(y.getDate()-1);const yk=y.toISOString().split("T")[0];
+        const today=todayKey(),y=new Date();y.setDate(y.getDate()-1);const yk=localDateStr(y);
         if(streaks.lastDate!==today){
           const nc=streaks.lastDate===yk?streaks.current+1:1;
           const nst={...streaks,current:nc,longest:Math.max(nc,streaks.longest||0),lastDate:today,totalDaysComplete:(streaks.totalDaysComplete||0)+1};
@@ -655,6 +720,28 @@ export default function App() {
     if(type==="monthly"&&["m9","m10","m11"].includes(id)&&nowChecked){
       const nst={...streaks,sabbathCount:(streaks.sabbathCount||0)+1};setStreaks(nst);await save("wb-streaks-v3",nst);
     }
+  }
+
+  // Write daily summary to history after each check
+  async function writeHistory(newDailyState) {
+    const today = todayKey();
+    const checked = Object.values(newDailyState).filter(v=>v?.checked).length;
+    const pct = Math.round((checked / CHECKLIST_HOME.daily.length)*100);
+    const items = {};
+    CHECKLIST_HOME.daily.forEach(item => {
+      items[item.id] = { text:item.text, checked:!!newDailyState[item.id]?.checked };
+    });
+    const newHistory = { ...history, [today]: { dailyPct:pct, checked, total:CHECKLIST_HOME.daily.length, items } };
+    setHistory(newHistory);
+    await save(`wb-history-${yearKey()}`, newHistory);
+  }
+
+  // Load a specific past day for read-only view
+  async function viewPastDay(dateStr) {
+    if(dateStr === todayKey()) { setViewDate(null); setHistoryDay(null); return; }
+    setViewDate(dateStr);
+    const dayData = await load(`cl-daily-${dateStr}`);
+    setHistoryDay(dayData || {});
   }
 
   async function enableTravel(){
@@ -728,6 +815,157 @@ export default function App() {
   const levelInfo=getLevelInfo(totalXP);
   const filteredGoals=domainFilter==="all"?goals:goals.filter(g=>g.domain===domainFilter);
 
+
+  // ── DATE STRIP ──────────────────────────────────────────────────────
+  function DateStrip() {
+    const days = getPastDays(30).reverse(); // most recent first
+    const today = todayKey();
+    const stripRef = useRef(null);
+
+    useEffect(()=>{
+      // Scroll to start (today) on mount
+      if(stripRef.current) stripRef.current.scrollLeft = 0;
+    },[]);
+
+    function dotColor(dateStr) {
+      if(dateStr === today) return null;
+      const h = history[dateStr];
+      if(!h) return "dot-empty";
+      if(h.dailyPct >= 100) return "dot-full";
+      if(h.dailyPct >= 80)  return "dot-good";
+      if(h.dailyPct >= 40)  return "dot-partial";
+      return "dot-low";
+    }
+
+    const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+
+    return (
+      <div className="date-strip-wrap">
+        <div className="date-strip" ref={stripRef}>
+          {days.map(dateStr => {
+            const d = new Date(dateStr + "T12:00:00");
+            const isToday = dateStr === today;
+            const isViewing = viewDate === dateStr;
+            const dot = dotColor(dateStr);
+            return (
+              <div key={dateStr} className="day-chip" onClick={()=>viewPastDay(dateStr)}>
+                <div className={`day-chip-inner ${isToday?"today":""} ${isViewing?"viewing":""}`}>
+                  <div className="day-chip-dow">{DAYS[d.getDay()]}</div>
+                  <div className="day-chip-num">{d.getDate()}</div>
+                  {dot && <div className={`day-dot ${dot}`}/>}
+                  {isToday && !viewDate && <div className="day-dot" style={{background:"#2563EB"}}/>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{textAlign:"right",marginTop:-4}}>
+          <button onClick={()=>setShowYearMap(true)} style={{background:"none",border:"none",fontSize:11,fontWeight:700,color:"#94A3B8",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>
+            Full Year ›
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── YEAR HEATMAP ─────────────────────────────────────────────────────
+  function YearMap() {
+    const yearDays = getYearDays();
+    const today = todayKey();
+    // Group by month
+    const months = {};
+    yearDays.forEach(d => {
+      const dt = new Date(d + "T12:00:00");
+      const mk = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`;
+      const label = dt.toLocaleDateString("en-US",{month:"long"});
+      if(!months[mk]) months[mk] = {label, days:[]};
+      months[mk].days.push(d);
+    });
+
+    function cellBg(dateStr) {
+      if(dateStr === today) return "#2563EB";
+      const h = history[dateStr];
+      if(!h) return "#F1F5F9";
+      if(h.dailyPct >= 100) return "#059669";
+      if(h.dailyPct >= 80)  return "#34D399";
+      if(h.dailyPct >= 40)  return "#F59E0B";
+      return "#EF4444";
+    }
+
+    function cellLabel(dateStr) {
+      const d = new Date(dateStr + "T12:00:00");
+      return d.getDate();
+    }
+
+    return (
+      <div className="yearmap-overlay" onClick={()=>setShowYearMap(false)}>
+        <div className="yearmap-sheet" onClick={e=>e.stopPropagation()}>
+          <div className="yearmap-title">Year in Review</div>
+          <div className="yearmap-sub">
+            <span style={{display:"inline-flex",gap:8,alignItems:"center"}}>
+              <span style={{width:10,height:10,borderRadius:3,background:"#059669",display:"inline-block"}}/> 100%&nbsp;
+              <span style={{width:10,height:10,borderRadius:3,background:"#34D399",display:"inline-block"}}/> 80%+&nbsp;
+              <span style={{width:10,height:10,borderRadius:3,background:"#F59E0B",display:"inline-block"}}/> 40%+&nbsp;
+              <span style={{width:10,height:10,borderRadius:3,background:"#EF4444",display:"inline-block"}}/> &lt;40%
+            </span>
+          </div>
+          <div className="yearmap-months">
+            {Object.entries(months).map(([mk,{label,days}])=>(
+              <div key={mk}>
+                <div className="yearmap-month-label">{label}</div>
+                <div className="yearmap-grid">
+                  {days.map(d=>(
+                    <div key={d} className="yearmap-cell"
+                      style={{background:cellBg(d),color:history[d]||d===today?"rgba(255,255,255,0.9)":"#CBD5E1"}}
+                      onClick={()=>{setShowYearMap(false);viewPastDay(d);}}>
+                      {cellLabel(d)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="yearmap-close" onClick={()=>setShowYearMap(false)}>Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── HISTORY DAY VIEW ────────────────────────────────────────────────
+  function HistoryDayView() {
+    const dt = new Date(viewDate + "T12:00:00");
+    const label = dt.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+    const hist = history[viewDate];
+    const pct = hist?.dailyPct ?? 0;
+
+    return (
+      <div>
+        <div className="history-banner">
+          <div>
+            <div className="history-banner-text">📅 {label}</div>
+            <div style={{fontSize:12,color:"#B45309",marginTop:2}}>Daily completion: {pct}%</div>
+          </div>
+          <button className="history-banner-btn" onClick={()=>{setViewDate(null);setHistoryDay(null);}}>Back to today ›</button>
+        </div>
+        <div className="check-card">
+          {CHECKLIST_HOME.daily.map(item => {
+            const checked = historyDay?.[item.id]?.checked || false;
+            const ts = historyDay?.[item.id]?.at;
+            return (
+              <div key={item.id} className="history-item">
+                <div className={`c-icon-bg ${checked?"done":""}`} style={{opacity:checked?1:0.4}}>{item.icon}</div>
+                <div className={`history-check ${checked?"done":"missed"}`}/>
+                <div className="c-body">
+                  <div className="c-main" style={{color:checked?"#0B1929":"#CBD5E1"}}>{item.text}</div>
+                  {checked && ts && <div className="c-ts">{new Date(ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   function TodoList({todos, setTodos}) {
     const [input, setInput] = useState("");
@@ -846,40 +1084,59 @@ export default function App() {
 
           {tab==="today"&&(
             <>
-              <div className={travelMode?"hero-travel":"hero-home"} style={{marginTop:4}}>
-                <div className="h-eyebrow">{travelMode?`✈️ ${travelDest}`:"Current Streak"}</div>
-                <div className="h-streak-wrap">
-                  <div className="h-streak-num">{animStreak}</div>
-                  <div className="h-streak-right">
-                    <span className={travelMode?"fire-travel h-fire":"h-fire"}>🔥</span>
-                    <div className="h-best">Best: {streaks.longest}</div>
+              {/* Hero — only show when viewing today */}
+              {!viewDate&&(
+                <>
+                  <div className={travelMode?"hero-travel":"hero-home"} style={{marginTop:4}}>
+                    <div className="h-eyebrow">{travelMode?`✈️ ${travelDest}`:"Current Streak"}</div>
+                    <div className="h-streak-wrap">
+                      <div className="h-streak-num">{animStreak}</div>
+                      <div className="h-streak-right">
+                        <span className={travelMode?"fire-travel h-fire":"h-fire"}>🔥</span>
+                        <div className="h-best">Best: {streaks.longest}</div>
+                      </div>
+                    </div>
+                    <div className="h-prog-row"><div className="h-prog-label">Today's progress</div><div className="h-prog-pct">{dailyPct}%</div></div>
+                    <div className="h-track"><div className={travelMode?"h-fill-travel":"h-fill-home"} style={{width:`${dailyPct}%`}}/></div>
+                    <div className="h-stats">
+                      <div className="h-stat"><div className="h-stat-val">{totalXP}</div><div className="h-stat-lbl">XP</div></div>
+                      <div className="h-stat"><div className="h-stat-val">{goalsComplete}</div><div className="h-stat-lbl">Goals</div></div>
+                      <div className="h-stat"><div className="h-stat-val">{Object.values(curDaily).filter(v=>v?.checked).length}/{CL.daily.length}</div><div className="h-stat-lbl">Done</div></div>
+                    </div>
                   </div>
-                </div>
-                <div className="h-prog-row"><div className="h-prog-label">Today's progress</div><div className="h-prog-pct">{dailyPct}%</div></div>
-                <div className="h-track"><div className={travelMode?"h-fill-travel":"h-fill-home"} style={{width:`${dailyPct}%`}}/></div>
-                <div className="h-stats">
-                  <div className="h-stat"><div className="h-stat-val">{totalXP}</div><div className="h-stat-lbl">XP</div></div>
-                  <div className="h-stat"><div className="h-stat-val">{goalsComplete}</div><div className="h-stat-lbl">Goals</div></div>
-                  <div className="h-stat"><div className="h-stat-val">{Object.values(curDaily).filter(v=>v?.checked).length}/{CL.daily.length}</div><div className="h-stat-lbl">Done</div></div>
-                </div>
-              </div>
-              <div className="xp-card">
-                <div className="xp-row"><div className="xp-level">Level {levelInfo.l} — {levelInfo.t}</div><div className="xp-pts">{totalXP} XP</div></div>
-                <div className="xp-track"><div className="xp-fill" style={{width:`${levelInfo.progress}%`}}/></div>
-              </div>
-              {travelMode&&<div className="travel-badge"><span style={{fontSize:18}}>🗺️</span><div><div className="tb-dest">{travelDest}</div><div className="tb-sub">Travel checklist active</div></div></div>}
-              {(()=>{const s=getDailyScripture();return(<div className="scripture-card"><div className="scripture-verse">{s.verse}</div><div className="scripture-ref">{s.ref}</div></div>);})()}
-              <div className="prompt-card">
-                <div className="prompt-icon">{travelMode?"🌍":"✨"}</div>
-                <div className="prompt-body">
-                  <div className="prompt-title">{travelMode?"Stay anchored on the road":"Start your day strong"}</div>
-                  <div className="prompt-sub">{Object.values(curDaily).filter(v=>v?.checked).length} of {CL.daily.length} complete</div>
-                </div>
-                <div className="prompt-arrow">{dailyPct}%</div>
-              </div>
-              <div className="sec"><div className="sec-title">{travelMode?"Travel Daily":"Daily"}</div></div>
-              <CheckGroup items={CL.daily} state={curDaily} type="daily" travel={travelMode}/>
-              <TodoList todos={todos} setTodos={setTodos}/>
+                  <div className="xp-card">
+                    <div className="xp-row"><div className="xp-level">Level {levelInfo.l} — {levelInfo.t}</div><div className="xp-pts">{totalXP} XP</div></div>
+                    <div className="xp-track"><div className="xp-fill" style={{width:`${levelInfo.progress}%`}}/></div>
+                  </div>
+                  {travelMode&&<div className="travel-badge"><span style={{fontSize:18}}>🗺️</span><div><div className="tb-dest">{travelDest}</div><div className="tb-sub">Travel checklist active</div></div></div>}
+                  {(()=>{const s=getDailyScripture();return(<div className="scripture-card"><div className="scripture-verse">{s.verse}</div><div className="scripture-ref">{s.ref}</div></div>);})()}
+                </>
+              )}
+
+              {/* Date strip — always visible in Today tab */}
+              <DateStrip/>
+
+              {/* Year heatmap modal */}
+              {showYearMap&&<YearMap/>}
+
+              {/* Content — today or past day */}
+              {viewDate ? (
+                <HistoryDayView/>
+              ) : (
+                <>
+                  <div className="prompt-card">
+                    <div className="prompt-icon">{travelMode?"🌍":"✨"}</div>
+                    <div className="prompt-body">
+                      <div className="prompt-title">{travelMode?"Stay anchored on the road":"Start your day strong"}</div>
+                      <div className="prompt-sub">{Object.values(curDaily).filter(v=>v?.checked).length} of {CL.daily.length} complete</div>
+                    </div>
+                    <div className="prompt-arrow">{dailyPct}%</div>
+                  </div>
+                  <div className="sec"><div className="sec-title">{travelMode?"Travel Daily":"Daily"}</div></div>
+                  <CheckGroup items={CL.daily} state={curDaily} type="daily" travel={travelMode}/>
+                  <TodoList todos={todos} setTodos={setTodos}/>
+                </>
+              )}
             </>
           )}
 
