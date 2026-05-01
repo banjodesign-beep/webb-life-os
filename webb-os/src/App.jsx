@@ -1484,22 +1484,154 @@ export default function App() {
             </>
           )}
 
+          {/* ── JOURNAL TAB ── */}
           {tab==="insights"&&(
             <>
               <div className="quote-hero" style={{marginTop:4}}>
-                <div className="q-lbl">Core Thesis</div>
-                <div className="q-text">"Really chasing the Lord means great sacrifice but great outcomes — encouraging others to dream and live a life less ordinary."</div>
-                <div className="q-attr">Ben Webb</div>
+                <div className="q-lbl">Daily Stillness</div>
+                <div className="q-text">"Be still and know that I am God."</div>
+                <div className="q-attr">Psalm 46:10</div>
               </div>
 
-              <div className="sec"><div className="sec-title">The Five Tenets</div></div>
-              <div className="vision-card">
-                {[["Stewardship","Care for what God entrusted: health, family, finances, talent, platform."],["Service","Act humbly. IJM. Family presence. Platform for others."],["Scale","Build and multiply. Legacy for children. Platform that outlasts the role."],["Sweat","Work hard. God-honoring things face natural resistance."],["Sabbath","Three Sundays per month minimum. Rest in sovereignty."]].map(([n,d])=>(
-                  <div className="tenet-row" key={n}><div className="tenet-s">S</div><div><div className="tenet-name">{n}</div><div className="tenet-desc">{d}</div></div></div>
+              <div className="sec">
+                <div className="sec-title">Today's Reflection</div>
+                <div className="sec-sub">{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+              </div>
+              <textarea
+                className="journal-input"
+                rows={7}
+                placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"}
+                value={journalInput}
+                onChange={e=>saveJournalEntry(e.target.value)}
+                style={{width:"100%",marginBottom:16}}
+              />
+
+              {Object.entries(journal).filter(([d,t])=>d!==todayKey()&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7).length>0&&(
+                <>
+                  <div className="sec"><div className="sec-title">Recent Entries</div></div>
+                  {Object.entries(journal).filter(([d,t])=>d!==todayKey()&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7).map(([d,t])=>{
+                    const dt=new Date(d+"T12:00:00");
+                    const lbl=dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+                    return(
+                      <div key={d} className="journal-entry-card">
+                        <div className="journal-entry-date">{lbl}</div>
+                        <div className="journal-entry-text">{t.length>220?t.slice(0,220)+"…":t}</div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── VISION TAB (keep inside planner) ── */}
+          {/* ── PLANNER TAB ── */}
+          {tab==="planner"&&(
+            <>
+              {/* Week header */}
+              <div style={{background:"linear-gradient(145deg,#0B1929,#1A3A6B,#2563EB)",backgroundSize:"300% 300%",animation:"gradShift 10s ease infinite",borderRadius:26,padding:"24px 22px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden"}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.16em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>
+                  {(()=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+1);const e=new Date(d);e.setDate(e.getDate()+6);return `Week of ${d.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${e.toLocaleDateString("en-US",{month:"short",day:"numeric"})}`})()}
+                </div>
+                <div style={{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:4}}>Weekly Plan</div>
+                <div style={{fontSize:14,color:"rgba(255,255,255,0.45)"}}>What does this week need to produce?</div>
+              </div>
+
+              {/* Top 3 */}
+              <div className="sec"><div className="sec-title">Top 3 Priorities</div><div className="sec-sub">The three things that must happen this week</div></div>
+              <div className="plan-card">
+                {[0,1,2].map(i=>(
+                  <div key={i} className="plan-priority-row">
+                    <div className="plan-num">{i+1}</div>
+                    <input
+                      className="plan-input"
+                      placeholder={["Most important this week…","Second priority…","Third priority…"][i]}
+                      value={weekPlan.top3?.[i]||""}
+                      onChange={e=>{
+                        const t=[...((weekPlan.top3)||["","",""])];
+                        t[i]=e.target.value;
+                        saveWeekPlan({...weekPlan,top3:t});
+                      }}
+                    />
+                  </div>
                 ))}
               </div>
+
+              {/* Intention */}
+              <div className="sec"><div className="sec-title">Intention</div><div className="sec-sub">How do I want to show up this week?</div></div>
+              <textarea
+                className="journal-input"
+                rows={3}
+                placeholder={"As a leader, husband, father — what does this week call for?\nWhat do I need to bring?"}
+                value={weekPlan.intention||""}
+                onChange={e=>saveWeekPlan({...weekPlan,intention:e.target.value})}
+                style={{width:"100%",marginBottom:16}}
+              />
+
+              {/* Gratitude */}
+              <div className="sec"><div className="sec-title">Gratitude</div><div className="sec-sub">What from last week deserves acknowledgment?</div></div>
+              <textarea
+                className="journal-input"
+                rows={3}
+                placeholder={"What went well?\nWhat am I grateful for coming into this week?"}
+                value={weekPlan.gratitude||""}
+                onChange={e=>saveWeekPlan({...weekPlan,gratitude:e.target.value})}
+                style={{width:"100%",marginBottom:16}}
+              />
+
+              {/* Carry forward */}
+              <div className="sec"><div className="sec-title">Carry Forward</div><div className="sec-sub">Anything unfinished from last week?</div></div>
+              <textarea
+                className="journal-input"
+                rows={2}
+                placeholder={"What didn't get done that still matters?"}
+                value={weekPlan.carryForward||""}
+                onChange={e=>saveWeekPlan({...weekPlan,carryForward:e.target.value})}
+                style={{width:"100%",marginBottom:16}}
+              />
+
+              {/* Focus summary */}
+              <div className="sec"><div className="sec-title">This Week's Focus Areas</div></div>
+              <div className="check-card" style={{marginBottom:16}}>
+                {[
+                  {label:"Platform", sub:weekPlan.top3?.[0]||"Add your top priority above ↑", color:"#7C3AED"},
+                  {label:"IJM Leadership", sub:"Strategic thinking hour + team health check", color:"#2563EB"},
+                  {label:"Family", sub:"River transport + real connection with Jules", color:"#059669"},
+                  {label:"Music", sub:"3 practice sessions target", color:"#0891B2"},
+                ].map(({label,sub,color})=>(
+                  <div key={label} className="c-row" style={{cursor:"default"}}>
+                    <div className="c-icon-bg" style={{background:`${color}15`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
+                    </div>
+                    <div className="c-body">
+                      <div className="c-main">{label}</div>
+                      <div className="c-hint">{sub}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Vision anchor */}
+              <div className="sec"><div className="sec-title">Vision Anchor</div><div className="sec-sub">Why this week matters</div></div>
+              <div className="vision-card">
+                <div className="v-title">The Five Tenets</div>
+                <div style={{marginTop:10}}>
+                  {[["Stewardship","Care for what God entrusted."],["Service","Act humbly. IJM. Family. Platform."],["Scale","Build and multiply. Legacy."],["Sweat","God-honoring things face resistance."],["Sabbath","Three Sundays/month. Rest in sovereignty."]].map(([n,d])=>(
+                    <div key={n} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid #F1F5F9"}}>
+                      <div style={{fontSize:16,fontWeight:900,color:"#2563EB",width:20,flexShrink:0}}>S</div>
+                      <div><div style={{fontSize:13,fontWeight:700,color:"#0B1929"}}>{n}</div><div style={{fontSize:12,color:"#64748B"}}>{d}</div></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="sec"><div className="sec-title">Vision at 55</div></div>
-              {[{t:"Family",b:"Annie's path built on depth. River's ceiling limited only by talent. Parents cared for. Jules and the kids have seen the world with you."},{t:"Platform",b:"Recalibrated and The Sequence published. One Five One moving. A body of work that opens doors."},{t:"Marriage",b:"Jules is the primary relationship. December 2, 2026 — the 20th anniversary — is a milestone, not a calendar entry."},{t:"Music",b:"An album completed. Songs that carry the same conviction as the books."}].map(v=>(
+              {[
+                {t:"Family",b:"Annie's path built on depth. River's ceiling limited by talent only. Parents cared for. Jules and the kids have seen the world with you."},
+                {t:"Platform",b:"Recalibrated and The Sequence published. One Five One moving. A body of work that opens doors."},
+                {t:"Marriage",b:"Jules is the primary relationship. December 2, 2026 — the 20th anniversary — is a milestone, not a calendar entry."},
+                {t:"Music",b:"An album completed. Songs that carry the same conviction as the books."},
+              ].map(v=>(
                 <div key={v.t} className="vision-card"><div className="v-title">{v.t}</div><div className="v-body">{v.b}</div></div>
               ))}
             </>
