@@ -166,15 +166,15 @@ function summerDaysLeft(){const n=new Date(),s=new Date(n.getFullYear(),5,21);if
 function formatDate(){return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});}
 function formatShort(iso){return new Date(iso).toLocaleDateString("en-US",{month:"short",day:"numeric"});}
 
-// ── WEBB LOGO ─────────────────────────────────────────────────────────
-function WebbLogo({size=32, color="#1A3A6B", style={}}) {
+// ── APP ICON ──────────────────────────────────────────────────────────
+function WebbLogo({size=32, style={}}) {
   return (
     <img
-      src="/webb-logo.svg"
+      src="/app-icon.png"
       width={size}
       height={size}
-      alt="Webb"
-      style={{display:"block", filter: color==="#fff" ? "brightness(0) invert(1)" : color==="#1A3A6B" ? "brightness(0) saturate(100%) invert(18%) sepia(52%) saturate(800%) hue-rotate(195deg)" : "none", ...style}}
+      alt="Webb Life OS"
+      style={{display:"block", borderRadius: size > 40 ? size*0.22 : size*0.18, objectFit:"cover", ...style}}
     />
   );
 }
@@ -1237,9 +1237,9 @@ export default function App() {
     <>
       <style>{CSS}</style>
       <div className="loading">
-        <div style={{fontSize:40}}>⚡</div>
+        <WebbLogo size={72} style={{marginBottom:16,boxShadow:"0 8px 32px rgba(26,58,107,0.25)"}}/>
         <div className="loading-title">Webb Life OS</div>
-        <div className="loading-sub">Connecting to database…</div>
+        <div className="loading-sub">Connecting…</div>
       </div>
     </>
   );
@@ -1268,7 +1268,7 @@ export default function App() {
         <div className="hdr">
           <div className="hdr-inner">
             <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <WebbLogo size={32} color="#1A3A6B"/>
+              <WebbLogo size={32}/>
               <div>
                 <div className="hdr-eyebrow">{travelMode?`✈️ ${travelDest}`:"Webb Life OS"}</div>
                 <div className="hdr-date">{formatDate()}</div>
@@ -1290,7 +1290,7 @@ export default function App() {
                   <div className={travelMode?"hero-travel":"hero-home"} style={{marginTop:4}}>
                     {!travelMode&&(
                   <div style={{display:"flex",justifyContent:"center",marginBottom:12}}>
-                    <WebbLogo size={44} color="#fff"/>
+                    <WebbLogo size={44}/>
                   </div>
                 )}
                 <div className="h-eyebrow">{travelMode?`✈️ ${travelDest}`:"Current Streak"}</div>
