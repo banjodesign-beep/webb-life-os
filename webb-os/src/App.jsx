@@ -3,18 +3,19 @@ import { load, save } from "./lib/supabase.js";
 
 // ── DATA ──────────────────────────────────────────────────────────────
 
+const DAILY_COMPLETE_BONUS = 50; // XP bonus for completing ALL daily items
+const STREAK_BONUS_PER_DAY = 10; // extra XP per streak day on completion
+
 const CHECKLIST_HOME = {
   daily: [
-    { id:"d0", text:"30 min stillness",        sub:"Prayer before the day opens.",              xp:10, icon:"🕊️" },
-    { id:"d1", text:"Morning anchor",           sub:"Identity before activity.",                 xp:5,  icon:"☀️" },
-    { id:"d2", text:"No caffeine after 12pm",   sub:"Slow metabolizer — protect sleep.",        xp:3,  icon:"☕" },
-    { id:"d3", text:"Present with family",      sub:"Eye contact. No phone at dinner.",          xp:5,  icon:"🏠" },
-    { id:"d4", text:"Push-ups done",            sub:"Every day. No excuse.",                     xp:4,  icon:"💪" },
-    { id:"d5", text:"No decisions after 9pm",   sub:"Hard problems get morning slots.",          xp:2,  icon:"🌙" },
+    { id:"d0", text:"30 min stillness",        sub:"Prayer before the day opens.",              xp:15, icon:"🕊️" },
+    { id:"d1", text:"Morning anchor",           sub:"Identity before activity.",                 xp:10, icon:"☀️" },
+    { id:"d2", text:"No caffeine after 12pm",   sub:"Slow metabolizer — protect sleep.",        xp:5,  icon:"☕" },
+    { id:"d3", text:"Present with family",      sub:"Eye contact. No phone at dinner.",          xp:10, icon:"🏠" },
+    { id:"d4", text:"Push-ups done",            sub:"Every day. No excuse.",                     xp:8,  icon:"💪" },
+    { id:"d5", text:"No decisions after 9pm",   sub:"Hard problems get morning slots.",          xp:5,  icon:"🌙" },
   ],
   weekly: [
-    { id:"w0", text:"One platform action",      sub:"Write, note, draft, or reply.",            xp:15, icon:"✍️" },
-    { id:"w1", text:"LinkedIn or book page",    sub:"Monday priority.",                         xp:15, icon:"📝" },
     { id:"w2", text:"Financial dashboard",      sub:"Friday. 5 minutes.",                       xp:10, icon:"📊" },
     { id:"w3", text:"River transport",          sub:"Practices handled.",                        xp:10, icon:"⚽" },
     { id:"w4", text:"Real connection — Jules",  sub:"Not logistics. Actual presence.",          xp:15, icon:"💍" },
@@ -166,6 +167,32 @@ function summerDaysLeft(){const n=new Date(),s=new Date(n.getFullYear(),5,21);if
 function formatDate(){return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});}
 function formatShort(iso){return new Date(iso).toLocaleDateString("en-US",{month:"short",day:"numeric"});}
 
+
+// ── CHECK GROUP — defined outside App to prevent flicker on re-render ──
+const CheckGroup = React.memo(function CheckGroup({items, state, type, travel, onToggle, bouncing}) {
+  return (
+    <div className="check-card">
+      {items.map((item, idx) => {
+        const val = state[item.id];
+        const isDone = val?.checked;
+        const isBouncing = bouncing === item.id;
+        return (
+          <div key={item.id} className="c-row" style={{animationDelay:`${idx*0.04}s`}} onClick={() => onToggle(type, item.id, item)}>
+            <div className={`c-icon-bg ${isDone ? (travel ? "done-travel" : "done") : ""}`}>{item.icon}</div>
+            <div className={`c-circle ${isDone ? (travel ? "done-travel" : "done") : ""} ${isBouncing ? "bounce" : ""}`}/>
+            <div className="c-body">
+              <div className={`c-main ${isDone ? "done" : ""}`}>{item.text}</div>
+              <div className="c-hint">{item.sub}</div>
+              {isDone && val.at && <div className="c-ts">{new Date(val.at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</div>}
+            </div>
+            <div className={`c-xp ${isDone ? "done" : travel ? "travel" : ""}`}>{isDone ? "✓" : `+${item.xp}`}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 // ── APP ICON ──────────────────────────────────────────────────────────
 function WebbLogo({size=32, style={}}) {
   return (
@@ -276,7 +303,7 @@ button,input,textarea,select{font-family:inherit;}
 @keyframes xpFloat{0%{opacity:1;transform:translateY(0);}100%{opacity:0;transform:translateY(-60px);}}
 @keyframes shimmer{0%{background-position:-200% 0;}100%{background-position:200% 0;}}
 @keyframes fireGlow{0%,100%{text-shadow:0 0 8px rgba(251,191,36,0.4);}50%{text-shadow:0 0 20px rgba(251,191,36,0.9);}}
-@keyframes travelPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4);}50%{box-shadow:0 0 0 8px rgba(245,158,11,0);}}
+@keyframes travelPulse{0%,100%{box-shadow:0 0 0 0 rgba(48,176,199,0.4);}50%{box-shadow:0 0 0 8px rgba(48,176,199,0);}}
 @keyframes glow{0%,100%{opacity:0.6;}50%{opacity:1;}}
 @keyframes slideInLeft{from{opacity:0;transform:translateX(-20px);}to{opacity:1;transform:translateX(0);}}
 @keyframes fadeOut{to{opacity:0;transform:translateX(-50%) translateY(-6px);}}
@@ -294,7 +321,7 @@ button,input,textarea,select{font-family:inherit;}
 .hdr-date{font-size:20px;font-weight:800;color:#0B1929;letter-spacing:-0.03em;line-height:1.1;}
 .travel-toggle{display:flex;align-items:center;gap:7px;padding:8px 14px;border-radius:100px;border:none;cursor:pointer;font-size:13px;font-weight:700;transition:all 0.3s;}
 .travel-toggle.off{background:#F1F5F9;color:#64748B;}
-.travel-toggle.on{background:linear-gradient(90deg,#92400E,#D97706);color:#fff;animation:travelPulse 2s infinite;}
+.travel-toggle.on{background:linear-gradient(90deg,#0E8AA0,#30B0C7);color:#fff;animation:travelPulse 2s infinite;}
 .modal-overlay{position:fixed;inset:0;background:rgba(11,25,41,0.5);z-index:200;display:flex;align-items:flex-end;}
 .modal-sheet{background:#fff;border-radius:24px 24px 0 0;padding:28px 22px 40px;width:100%;}
 .modal-title{font-size:22px;font-weight:800;color:#0B1929;margin-bottom:6px;}
@@ -302,13 +329,13 @@ button,input,textarea,select{font-family:inherit;}
 .modal-input{width:100%;background:#F0F4FA;border:2px solid transparent;border-radius:16px;padding:16px 18px;font-size:18px;font-weight:600;color:#0B1929;outline:none;transition:all 0.2s;margin-bottom:14px;}
 .modal-input:focus{background:#fff;border-color:#2563EB;}
 .modal-input::placeholder{color:#CBD5E1;font-weight:400;}
-.modal-btn{width:100%;padding:18px;border:none;border-radius:16px;background:linear-gradient(135deg,#B45309,#D97706);color:#fff;font-size:17px;font-weight:800;cursor:pointer;}
+.modal-btn{width:100%;padding:18px;border:none;border-radius:16px;background:linear-gradient(135deg,#0A5F75,#30B0C7);color:#fff;font-size:17px;font-weight:800;cursor:pointer;}
 .modal-cancel{width:100%;padding:12px;border:none;background:transparent;color:#94A3B8;font-size:15px;cursor:pointer;margin-top:8px;}
 .scroll{flex:1;overflow-y:auto;padding:14px 15px 100px;}
 .hero-home{background:linear-gradient(145deg,#0B1929,#1A3A6B,#1E40AF,#2563EB);background-size:300% 300%;animation:gradShift 10s ease infinite;border-radius:26px;padding:26px 22px 22px;margin-bottom:12px;position:relative;overflow:hidden;}
 .hero-home::before{content:'';position:absolute;top:-60px;right:-50px;width:240px;height:240px;background:radial-gradient(circle,rgba(96,165,250,0.2),transparent 70%);animation:glow 4s ease-in-out infinite;}
-.hero-travel{background:linear-gradient(145deg,#1C0A00,#78350F,#B45309,#D97706);background-size:300% 300%;animation:gradShift 8s ease infinite;border-radius:26px;padding:26px 22px 22px;margin-bottom:12px;position:relative;overflow:hidden;}
-.hero-travel::before{content:'';position:absolute;top:-60px;right:-50px;width:240px;height:240px;background:radial-gradient(circle,rgba(251,191,36,0.15),transparent 70%);animation:glow 3s ease-in-out infinite;}
+.hero-travel{background:linear-gradient(145deg,#003D4F,#0A5F75,#0E8AA0,#30B0C7);background-size:300% 300%;animation:gradShift 8s ease infinite;border-radius:26px;padding:26px 22px 22px;margin-bottom:12px;position:relative;overflow:hidden;}
+.hero-travel::before{content:'';position:absolute;top:-60px;right:-50px;width:240px;height:240px;background:radial-gradient(circle,rgba(48,176,199,0.2),transparent 70%);animation:glow 3s ease-in-out infinite;}
 .h-eyebrow{font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:4px;}
 .h-streak-wrap{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px;position:relative;z-index:1;}
 .h-streak-num{font-size:86px;font-weight:900;color:#fff;line-height:1;letter-spacing:-0.06em;animation:countUp 0.6s ease;}
@@ -326,7 +353,7 @@ button,input,textarea,select{font-family:inherit;}
 .h-stat{background:rgba(255,255,255,0.09);border-radius:14px;padding:12px 10px;backdrop-filter:blur(8px);}
 .h-stat-val{font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.03em;}
 .h-stat-lbl{font-size:9px;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;}
-.travel-badge{background:linear-gradient(135deg,#78350F,#D97706);border-radius:12px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;}
+.travel-badge{background:linear-gradient(135deg,#0A5F75,#30B0C7);border-radius:12px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;}
 .tb-dest{font-size:15px;font-weight:800;color:#fff;}
 .tb-sub{font-size:12px;color:rgba(255,255,255,0.55);}
 .xp-card{
@@ -362,7 +389,7 @@ button,input,textarea,select{font-family:inherit;}
 .todo-input::placeholder{color:#CBD5E1;}
 .todo-input:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,0.08);}
 .todo-add-btn{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#1A3A6B,#2563EB);border:none;color:#fff;font-size:24px;font-weight:300;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 10px rgba(37,99,235,0.3);}
-.todo-circle{width:24px;height:24px;border-radius:50%;border:2px solid #CBD5E1;flex-shrink:0;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;}
+.todo-circle{width:24px;height:24px;border-radius:50%;border:2.5px solid #94A3B8;flex-shrink:0;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.5);}
 .todo-circle.done{background:linear-gradient(135deg,#059669,#34D399);border-color:transparent;}
 .todo-circle.done::after{content:'✓';color:#fff;font-size:11px;font-weight:800;}
 .todo-del{background:none;border:none;color:#CBD5E1;font-size:20px;cursor:pointer;padding:4px;line-height:1;transition:color 0.15s;flex-shrink:0;}
@@ -378,16 +405,16 @@ button,input,textarea,select{font-family:inherit;}
 .day-chip-num{font-size:16px;font-weight:800;color:#0B1929;line-height:1;}
 .day-chip-inner.today .day-chip-dow{color:#2563EB;}
 .day-chip-inner.today .day-chip-num{color:#2563EB;}
-.day-chip-inner.viewing .day-chip-num{color:#B45309;}
+.day-chip-inner.viewing .day-chip-num{color:#0E8AA0;}
 .day-dot{width:6px;height:6px;border-radius:50%;margin-top:1px;}
 .dot-empty{background:#E2E8F0;}
 .dot-full{background:#059669;}
 .dot-good{background:#34D399;}
 .dot-partial{background:#F59E0B;}
 .dot-low{background:#EF4444;}
-.history-banner{background:linear-gradient(135deg,#FEF3C7,#FDE68A);border:1px solid #FCD34D;border-radius:14px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
-.history-banner-text{font-size:13px;font-weight:700;color:#92400E;}
-.history-banner-btn{font-size:12px;font-weight:800;color:#B45309;background:none;border:none;cursor:pointer;letter-spacing:0.04em;}
+.history-banner{background:linear-gradient(135deg,#E0F7FA,#B2EBF2);border:1px solid #FCD34D;border-radius:14px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.history-banner-text{font-size:13px;font-weight:700;color:#0A5F75;}
+.history-banner-btn{font-size:12px;font-weight:800;color:#0E8AA0;background:none;border:none;cursor:pointer;letter-spacing:0.04em;}
 .history-item{display:flex;align-items:center;gap:13px;padding:14px 18px;border-bottom:1px solid #F1F5F9;}
 .history-item:last-child{border-bottom:none;}
 .history-check{width:24px;height:24px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
@@ -459,10 +486,10 @@ button,input,textarea,select{font-family:inherit;}
 .c-row.animIn{animation:fadeSlideUp 0.35s ease both;}
 .c-icon-bg{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;background:#F1F5F9;transition:all 0.3s;}
 .c-icon-bg.done{background:linear-gradient(135deg,#1A3A6B,#2563EB);}
-.c-icon-bg.done-travel{background:linear-gradient(135deg,#78350F,#D97706);}
-.c-circle{width:26px;height:26px;border-radius:50%;border:2px solid #CBD5E1;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all 0.25s;}
+.c-icon-bg.done-travel{background:linear-gradient(135deg,#0A5F75,#30B0C7);}
+.c-circle{width:26px;height:26px;border-radius:50%;border:2.5px solid #94A3B8;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all 0.25s;background:rgba(255,255,255,0.5);}
 .c-circle.done{background:linear-gradient(135deg,#1A3A6B,#2563EB);border-color:transparent;}
-.c-circle.done-travel{background:linear-gradient(135deg,#92400E,#D97706);border-color:transparent;}
+.c-circle.done-travel{background:linear-gradient(135deg,#0A5F75,#30B0C7);border-color:transparent;}
 .c-circle.bounce{animation:bounceCheck 0.4s ease;}
 .c-circle.done::after,.c-circle.done-travel::after{content:'✓';color:#fff;font-size:12px;font-weight:800;}
 .c-body{flex:1;min-width:0;}
@@ -471,7 +498,7 @@ button,input,textarea,select{font-family:inherit;}
 .c-hint{font-size:12px;color:#94A3B8;margin-top:2px;line-height:1.3;}
 .c-ts{font-size:10px;color:#CBD5E1;margin-top:3px;}
 .c-xp{font-size:12px;font-weight:700;color:#2563EB;min-width:28px;text-align:right;}
-.c-xp.travel{color:#D97706;}
+.c-xp.travel{color:#30B0C7;}
 .c-xp.done{color:#CBD5E1;}
 .ijm-header{background:linear-gradient(135deg,#0F172A,#1E293B);border-radius:16px 16px 0 0;padding:14px 18px;display:flex;align-items:center;gap:10px;}
 .ijm-dot{width:8px;height:8px;border-radius:50%;background:#2563EB;box-shadow:0 0 8px rgba(37,99,235,0.6);animation:glow 2s ease-in-out infinite;}
@@ -481,7 +508,7 @@ button,input,textarea,select{font-family:inherit;}
 .r-tabs{display:flex;background:rgba(255,255,255,0.7);border-radius:14px;padding:4px;gap:2px;margin-bottom:14px;backdrop-filter:blur(10px);}
 .r-tab{flex:1;padding:10px 4px;border:none;background:transparent;border-radius:10px;font-size:13px;font-weight:600;color:#64748B;cursor:pointer;transition:all 0.25s;}
 .r-tab.active{background:linear-gradient(135deg,#1A3A6B,#2563EB);color:#fff;box-shadow:0 2px 10px rgba(26,58,107,0.3);}
-.r-tab.travel-active{background:linear-gradient(135deg,#78350F,#D97706);color:#fff;}
+.r-tab.travel-active{background:linear-gradient(135deg,#0A5F75,#30B0C7);color:#fff;}
 .friend-list{background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 2px 16px rgba(11,25,41,0.07);margin-bottom:12px;}
 .friend-row{display:flex;align-items:center;gap:12px;padding:13px 17px;border-bottom:1px solid #F1F5F9;animation:slideInLeft 0.3s ease;}
 .friend-row:last-child{border-bottom:none;}
@@ -577,9 +604,9 @@ button,input,textarea,select{font-family:inherit;}
 .album-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;}
 .album-title{font-size:17px;font-weight:800;color:#0B1929;}
 .album-sub{font-size:12px;color:#64748B;margin-top:2px;}
-.countdown{background:linear-gradient(135deg,#FEF3C7,#FDE68A);border-radius:12px;padding:8px 13px;text-align:center;}
-.cd-num{font-size:20px;font-weight:900;color:#92400E;letter-spacing:-0.03em;}
-.cd-lbl{font-size:9px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:0.08em;}
+.countdown{background:linear-gradient(135deg,#E0F7FA,#B2EBF2);border-radius:12px;padding:8px 13px;text-align:center;}
+.cd-num{font-size:20px;font-weight:900;color:#0A5F75;letter-spacing:-0.03em;}
+.cd-lbl{font-size:9px;font-weight:700;color:#0A5F75;text-transform:uppercase;letter-spacing:0.08em;}
 .album-bar{height:8px;background:#EEF2F9;border-radius:100px;overflow:hidden;margin-bottom:8px;}
 .album-fill{height:100%;background:linear-gradient(90deg,#1A3A6B,#2563EB,#60A5FA);background-size:200% 100%;animation:shimmer 4s linear infinite;border-radius:100px;transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
 .album-footer{display:flex;justify-content:space-between;}
@@ -700,7 +727,7 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 }
 .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 2px;cursor:pointer;border:none;background:transparent;color:#CBD5E1;transition:color 0.2s;}
 .nav-btn.active{color:#2563EB;}
-.nav-btn.active.travel{color:#D97706;}
+.nav-btn.active.travel{color:#30B0C7;}
 .nav-icon{font-size:21px;line-height:1;}
 .nav-lbl{font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;}
 .toast{position:fixed;top:82px;left:50%;transform:translateX(-50%);background:#0B1929;border-radius:100px;padding:11px 22px;font-size:13px;font-weight:600;color:#fff;z-index:300;white-space:nowrap;animation:fadeSlideUp 0.3s ease,fadeOut 0.4s ease 2.1s forwards;box-shadow:0 4px 20px rgba(11,25,41,0.3);}
@@ -712,7 +739,7 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 .trip-row:last-child{border-bottom:none;}
 .trip-dest{font-size:15px;font-weight:700;color:#0B1929;}
 .trip-date{font-size:12px;color:#94A3B8;margin-top:1px;}
-.trip-badge{font-size:11px;font-weight:700;background:#FEF3C7;color:#B45309;padding:3px 9px;border-radius:100px;}
+.trip-badge{font-size:11px;font-weight:700;background:#E0F7FA;color:#0E8AA0;padding:3px 9px;border-radius:100px;}
 `;
 
 // ── MAIN APP ──────────────────────────────────────────────────────────
@@ -742,8 +769,11 @@ export default function App() {
   const [tempDest,   setTempDest]   = useState("");
   const [tripLog,    setTripLog]    = useState([]);
   const [todos,      setTodos]      = useState([]);
+  const [platform,   setPlatform]   = useState({});   // monthly-keyed platform items
   // Weekly planner
-  const [weekPlan,   setWeekPlan]   = useState({top3:["","",""],intention:"",gratitude:""});
+  const [weekPlan,   setWeekPlan]   = useState({top3:["","",""],intention:"",gratitude:"",carryForward:""});
+  const [planArchive,setPlanArchive]= useState({});   // {weekKey: planObject}
+  const [viewingPlanWeek,setViewingPlanWeek] = useState(null); // null = current week
   // Prayer journal
   const [journal,    setJournal]    = useState({});   // {dateStr: text}
   const [journalInput,setJournalInput] = useState("");
@@ -807,7 +837,9 @@ export default function App() {
         if(ach)setUnlockedAch(ach); if(tl)setTripLog(tl);
         if(tm)setTravelMode(tm); if(dest)setTravelDest(dest);
         const tod=await load("wb-todos-v1"); if(tod)setTodos(tod);
+        const plt=await load(`wb-platform-${monthKey()}`); if(plt)setPlatform(plt);
         const wp=await load(`wb-weekplan-${weekKey()}`); if(wp)setWeekPlan(wp);
+        const pa=await load(`wb-planarchive`); if(pa)setPlanArchive(pa);
         const jrnl=await load(`wb-journal-${yearKey()}`); if(jrnl){setJournal(jrnl);setJournalInput(jrnl[todayKey()]||"");}
         const hist=await load(`wb-history-${yearKey()}`); if(hist)setHistory(hist);
       } catch(e) { console.error("Load error:", e); }
@@ -874,13 +906,18 @@ export default function App() {
     if(type==="daily"&&!travelMode){
       await writeHistory(ns);
       const ac=CHECKLIST_HOME.daily.every(i=>(i.id===id?nowChecked:ns[i.id]?.checked));
-      if(ac){
+      if(ac && nowChecked){
         const today=todayKey(),y=new Date();y.setDate(y.getDate()-1);const yk=localDateStr(y);
         if(streaks.lastDate!==today){
           const nc=streaks.lastDate===yk?streaks.current+1:1;
+          // Streak bonus XP
+          const streakBonus = DAILY_COMPLETE_BONUS + (nc * STREAK_BONUS_PER_DAY);
+          const bonusXP = Math.max(0, totalXP + streakBonus);
+          setTotalXP(bonusXP);
+          await save("wb-totalxp", bonusXP);
           const nst={...streaks,current:nc,longest:Math.max(nc,streaks.longest||0),lastDate:today,totalDaysComplete:(streaks.totalDaysComplete||0)+1};
           setStreaks(nst);await save("wb-streaks-v3",nst);
-          if(nc>1)showToast(`🔥 ${nc}-day streak!`);
+          showToast(`🔥 Day complete! +${streakBonus} XP${nc>1?" · "+nc+"-day streak!":""}`);
         }
       }
     }
@@ -964,6 +1001,23 @@ export default function App() {
   async function saveWeekPlan(updated) {
     setWeekPlan(updated);
     await save(`wb-weekplan-${weekKey()}`, updated);
+    // Archive current week
+    const newArchive = {...planArchive, [weekKey()]: {...updated, savedAt: new Date().toISOString()}};
+    setPlanArchive(newArchive);
+    await save('wb-planarchive', newArchive);
+  }
+
+  async function savePlatformItem(id, checked) {
+    const ns = {...platform, [id]: {checked, at: new Date().toISOString()}};
+    setPlatform(ns);
+    await save(`wb-platform-${monthKey()}`, ns);
+    const item = PLATFORM_CHECKLIST.find(i=>i.id===id);
+    if(item && checked) {
+      const nxp = totalXP + item.xp;
+      setTotalXP(nxp);
+      await save("wb-totalxp", nxp);
+      showToast(`+${item.xp} XP`);
+    }
   }
 
   async function saveJournalEntry(text) {
@@ -1140,7 +1194,7 @@ export default function App() {
         <div className="history-banner">
           <div>
             <div className="history-banner-text">📅 {label}</div>
-            <div style={{fontSize:12,color:"#B45309",marginTop:2}}>Daily completion: {pct}%</div>
+            <div style={{fontSize:12,color:"#0E8AA0",marginTop:2}}>Daily completion: {pct}%</div>
           </div>
           <button className="history-banner-btn" onClick={()=>{setViewDate(null);setHistoryDay(null);}}>Back to today ›</button>
         </div>
@@ -1211,27 +1265,7 @@ export default function App() {
     );
   }
 
-  function CheckGroup({items,state,type,travel=false}){
-    return(
-      <div className="check-card">
-        {items.map((item,idx)=>{
-          const val=state[item.id];const isDone=val?.checked;const isBouncing=bouncing===item.id;
-          return(
-            <div key={item.id} className="c-row animIn" style={{animationDelay:`${idx*0.04}s`}} onClick={()=>toggleCheck(type,item.id,item)}>
-              <div className={`c-icon-bg ${isDone?(travel?"done-travel":"done"):""}`}>{item.icon}</div>
-              <div className={`c-circle ${isDone?(travel?"done-travel":"done"):""} ${isBouncing?"bounce":""}`}/>
-              <div className="c-body">
-                <div className={`c-main ${isDone?"done":""}`}>{item.text}</div>
-                <div className="c-hint">{item.sub}</div>
-                {isDone&&<div className="c-ts">{new Date(val.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>}
-              </div>
-              <div className={`c-xp ${isDone?"done":travel?"travel":""}`}>{isDone?"✓":`+${item.xp}`}</div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
+
 
   if(loading) return(
     <>
@@ -1338,7 +1372,7 @@ export default function App() {
                     <div className="prompt-arrow">{dailyPct}%</div>
                   </div>
                   <div className="sec"><div className="sec-title">{travelMode?"Travel Daily":"Daily"}</div></div>
-                  <CheckGroup items={CL.daily} state={curDaily} type="daily" travel={travelMode}/>
+                  <CheckGroup items={CL.daily} state={curDaily} type="daily" travel={travelMode} onToggle={toggleCheck} bouncing={bouncing}/>
                   <TodoList todos={todos} setTodos={setTodos}/>
                 </>
               )}
@@ -1362,11 +1396,11 @@ export default function App() {
                     </div>
                     <div className="prompt-arrow">{weeklyPct}%</div>
                   </div>
-                  <CheckGroup items={CL.weekly} state={curWeekly} type="weekly" travel={travelMode}/>
+                  <CheckGroup items={CL.weekly} state={curWeekly} type="weekly" travel={travelMode} onToggle={toggleCheck} bouncing={bouncing}/>
                   {!travelMode&&(
                     <>
                       <div className="ijm-header"><div className="ijm-dot"/><div><div className="ijm-title">IJM Leadership</div><div className="ijm-sub">Strategic + platform layer</div></div></div>
-                      <div className="ijm-card"><CheckGroup items={CHECKLIST_HOME.ijm} state={ijm} type="ijm"/></div>
+                      <div className="ijm-card"><CheckGroup items={CHECKLIST_HOME.ijm} state={ijm} type="ijm" onToggle={toggleCheck} bouncing={bouncing}/></div>
                     </>
                   )}
                 </>
@@ -1394,7 +1428,7 @@ export default function App() {
                       <div className="btn-row"><button className="btn-s" onClick={()=>setShowFF(false)}>Cancel</button><button className="btn-p" onClick={addFriend}>Log it</button></div>
                     </div>
                   )}
-                  <CheckGroup items={CHECKLIST_HOME.monthly} state={monthly} type="monthly"/>
+                  <CheckGroup items={CHECKLIST_HOME.monthly} state={monthly} type="monthly" onToggle={toggleCheck} bouncing={bouncing}/>
                 </>
               )}
               {rhythmTab==="annual"&&(
@@ -1404,7 +1438,7 @@ export default function App() {
                     <div style={{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:2}}>Health & Foundations</div>
                     <div style={{fontSize:13,color:"rgba(255,255,255,0.5)"}}>{annualPct}% complete</div>
                   </div>
-                  <CheckGroup items={CHECKLIST_HOME.annual} state={annual} type="annual"/>
+                  <CheckGroup items={CHECKLIST_HOME.annual} state={annual} type="annual" onToggle={toggleCheck} bouncing={bouncing}/>
                 </>
               )}
             </>
@@ -1680,8 +1714,52 @@ export default function App() {
           {/* ── PLANNER TAB ── */}
           {tab==="planner"&&(
             <>
+              {/* Archive browser */}
+              {Object.keys(planArchive).length > 0 && !viewingPlanWeek && (
+                <div style={{marginTop:4,marginBottom:12}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Previous Weeks</div>
+                  <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,scrollbarWidth:"none"}}>
+                    {Object.entries(planArchive).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,8).map(([wk,plan])=>{
+                      const [yr,wNum]=wk.split("-W");
+                      return(
+                        <button key={wk} onClick={()=>setViewingPlanWeek(wk)} style={{flexShrink:0,background:"rgba(255,255,255,0.65)",border:"1.5px solid rgba(255,255,255,0.6)",borderRadius:14,padding:"10px 14px",cursor:"pointer",textAlign:"left",backdropFilter:"blur(16px)"}}>
+                          <div style={{fontSize:12,fontWeight:800,color:"#1A3A6B"}}>W{wNum}</div>
+                          <div style={{fontSize:10,color:"#64748B"}}>{plan.top3?.[0]?.slice(0,20)||"No priority set"}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Viewing past week */}
+              {viewingPlanWeek && planArchive[viewingPlanWeek] && (
+                <>
+                  <div style={{background:"linear-gradient(135deg,#FEF3C7,#FDE68A)",borderRadius:14,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#92400E"}}>📅 Viewing {viewingPlanWeek}</div>
+                    <button onClick={()=>setViewingPlanWeek(null)} style={{background:"none",border:"none",fontSize:12,fontWeight:800,color:"#B45309",cursor:"pointer"}}>Back ›</button>
+                  </div>
+                  {[["Top 3","top3"],["Intention","intention"],["Gratitude","gratitude"],["Carry Forward","carryForward"]].map(([label,key])=>{
+                    const val = planArchive[viewingPlanWeek][key];
+                    if(!val || (Array.isArray(val) && !val.some(v=>v))) return null;
+                    return(
+                      <div key={key} style={{marginBottom:14}}>
+                        <div style={{fontSize:11,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>{label}</div>
+                        {Array.isArray(val)
+                          ? val.filter(v=>v).map((v,i)=><div key={i} style={{fontSize:14,color:"#0B1929",padding:"8px 0",borderBottom:"1px solid #F1F5F9"}}>{i+1}. {v}</div>)
+                          : <div style={{fontSize:14,color:"#334155",lineHeight:1.65,background:"rgba(255,255,255,0.6)",borderRadius:12,padding:"12px 14px",backdropFilter:"blur(16px)"}}>{val}</div>
+                        }
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Current week — only show if not viewing archive */}
+              {!viewingPlanWeek && (
+              <>
               {/* Week header */}
-              <div style={{background:"linear-gradient(145deg,#0B1929,#1A3A6B,#2563EB)",backgroundSize:"300% 300%",animation:"gradShift 10s ease infinite",borderRadius:26,padding:"24px 22px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden"}}>
+              <div style={{background:"linear-gradient(145deg,#0B1929,#1A3A6B,#2563EB)",backgroundSize:"300% 300%",animation:"gradShift 10s ease infinite",borderRadius:26,padding:"24px 22px 20px",marginBottom:12,position:"relative",overflow:"hidden"}}>
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.16em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>
                   {(()=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+1);const e=new Date(d);e.setDate(e.getDate()+6);return `Week of ${d.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${e.toLocaleDateString("en-US",{month:"short",day:"numeric"})}`})()}
                 </div>
@@ -1786,12 +1864,81 @@ export default function App() {
               ].map(v=>(
                 <div key={v.t} className="vision-card"><div className="v-title">{v.t}</div><div className="v-body">{v.b}</div></div>
               ))}
+              </>
+              )}
+            </>
+          )}
+
+          {/* ── PLATFORM TAB ── */}
+          {tab==="platform"&&(
+            <>
+              <div style={{background:"linear-gradient(145deg,#3B0764,#6D28D9,#7C3AED)",backgroundSize:"300% 300%",animation:"gradShift 10s ease infinite",borderRadius:26,padding:"24px 22px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:-40,right:-40,width:180,height:180,background:"radial-gradient(circle,rgba(167,139,250,0.2),transparent 70%)"}}/>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.16em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>Slow Burn</div>
+                <div style={{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:2}}>Platform Work</div>
+                <div style={{fontSize:14,color:"rgba(255,255,255,0.45)"}}>The books, the movement, the legacy.</div>
+                <div style={{marginTop:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {[
+                    {label:"Completed",val:PLATFORM_CHECKLIST.filter(i=>platform[i.id]?.checked).length+"/"+PLATFORM_CHECKLIST.length},
+                    {label:"XP Available",val:PLATFORM_CHECKLIST.reduce((s,i)=>s+i.xp,0)+" XP"},
+                  ].map(({label,val})=>(
+                    <div key={label} style={{background:"rgba(255,255,255,0.1)",borderRadius:14,padding:"10px 12px"}}>
+                      <div style={{fontSize:20,fontWeight:900,color:"#fff",letterSpacing:"-0.02em"}}>{val}</div>
+                      <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:2}}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="sec"><div className="sec-title">This Month</div><div className="sec-sub">Tap to mark complete · XP awarded</div></div>
+              <div className="check-card">
+                {PLATFORM_CHECKLIST.map((item,idx)=>{
+                  const val=platform[item.id];const isDone=val?.checked;
+                  return(
+                    <div key={item.id} className="c-row" onClick={()=>savePlatformItem(item.id,!isDone)}>
+                      <div className={`c-icon-bg ${isDone?"done":""}`}>{item.icon}</div>
+                      <div className={`c-circle ${isDone?"done":""}`}/>
+                      <div className="c-body">
+                        <div className={`c-main ${isDone?"done":""}`}>{item.text}</div>
+                        <div className="c-hint">{item.sub}</div>
+                        {isDone&&val.at&&<div className="c-ts">{new Date(val.at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>}
+                      </div>
+                      <div className={`c-xp ${isDone?"done":""}`}>{isDone?"✓":`+${item.xp}`}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="sec"><div className="sec-title">Projects</div></div>
+              {[
+                {title:"Recalibrated",sub:"Faith + leadership book",color:"#7C3AED",stage:"Writing"},
+                {title:"The Sequence",sub:"Marketing book",color:"#2563EB",stage:"Writing"},
+                {title:"One Five One",sub:"Men's movement",color:"#0891B2",stage:"Building"},
+                {title:"BenWebb.com",sub:"Unified platform",color:"#059669",stage:"Planning"},
+              ].map(p=>(
+                <div key={p.title} className="g-card" style={{borderLeft:`3px solid ${p.color}`,marginBottom:8}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div>
+                      <div style={{fontSize:15,fontWeight:700,color:"#0B1929"}}>{p.title}</div>
+                      <div style={{fontSize:12,color:"#64748B",marginTop:2}}>{p.sub}</div>
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,background:`${p.color}15`,color:p.color,padding:"4px 10px",borderRadius:100}}>{p.stage}</div>
+                  </div>
+                </div>
+              ))}
+
+              <div className="sec"><div className="sec-title">Core Thesis</div></div>
+              <div className="quote-hero">
+                <div className="q-lbl">What I'm building toward</div>
+                <div className="q-text">"Really chasing the Lord means great sacrifice but great outcomes — encouraging others to dream and live a life less ordinary."</div>
+                <div className="q-attr">Ben Webb</div>
+              </div>
             </>
           )}
         </div>
 
         <div className="bottom-nav">
-          {[{id:"today",icon:"☑️",lbl:"Today"},{id:"rhythms",icon:"🔄",lbl:"Rhythms"},{id:"planner",icon:"📋",lbl:"Plan"},{id:"progress",icon:"📈",lbl:"Progress"},{id:"insights",icon:"🕊️",lbl:"Journal"}].map(n=>(
+          {[{id:"today",icon:"☑️",lbl:"Today"},{id:"rhythms",icon:"🔄",lbl:"Rhythms"},{id:"platform",icon:"🚀",lbl:"Platform"},{id:"progress",icon:"📈",lbl:"Progress"},{id:"insights",icon:"🕊️",lbl:"Journal"}].map(n=>(
             <button key={n.id} className={`nav-btn ${tab===n.id?"active":""} ${tab===n.id&&travelMode?"travel":""}`} onClick={()=>setTab(n.id)}>
               <div className="nav-icon">{n.icon}</div>
               <div className="nav-lbl">{n.lbl}</div>
