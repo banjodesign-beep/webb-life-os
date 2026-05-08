@@ -11,7 +11,7 @@ export async function load(key) {
       .from('app_data')
       .select('value')
       .eq('key', key)
-      .single()
+      .maybeSingle()
     if (error || !data) return null
     return data.value
   } catch {

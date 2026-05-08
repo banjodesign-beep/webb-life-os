@@ -3,8 +3,18 @@ import { load, save } from "./lib/supabase.js";
 
 // ── DATA ──────────────────────────────────────────────────────────────
 
-const DAILY_COMPLETE_BONUS = 50; // XP bonus for completing ALL daily items
-const STREAK_BONUS_PER_DAY = 10; // extra XP per streak day on completion
+const DAILY_COMPLETE_BONUS = 50;
+const STREAK_BONUS_PER_DAY = 10;
+
+const PLATFORM_CHECKLIST = [
+  { id:"p0", text:"Recalibrated — chapter work",        sub:"Draft, edit, or outline. Any movement counts.",   xp:40, icon:"📖" },
+  { id:"p1", text:"The Sequence — chapter or article",  sub:"LinkedIn or manuscript progress.",                 xp:40, icon:"✍️" },
+  { id:"p2", text:"One Five One — content or planning", sub:"Podcast, groundwork, or movement planning.",      xp:35, icon:"🔥" },
+  { id:"p3", text:"IJM strategic thinking hour",        sub:"Uninterrupted. Big picture only.",                xp:30, icon:"🧠" },
+  { id:"p4", text:"IJM team health pulse",              sub:"How is my team? Am I leading well?",              xp:20, icon:"👥" },
+  { id:"p5", text:"Platform capture",                   sub:"What from this week feeds the books or 151?",    xp:25, icon:"🌍" },
+  { id:"p6", text:"BenWebb.com or social content",      sub:"Any public-facing platform action.",              xp:30, icon:"📱" },
+];
 
 const CHECKLIST_HOME = {
   daily: [
@@ -348,7 +358,7 @@ button,input,textarea,select{font-family:inherit;}
 .h-prog-pct{font-size:17px;font-weight:800;color:#fff;}
 .h-track{height:5px;background:rgba(255,255,255,0.12);border-radius:100px;overflow:hidden;position:relative;z-index:1;margin-bottom:18px;}
 .h-fill-home{height:100%;border-radius:100px;background:linear-gradient(90deg,#60A5FA,#BAE6FD);transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
-.h-fill-travel{height:100%;border-radius:100px;background:linear-gradient(90deg,#FCD34D,#FDE68A);transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
+.h-fill-travel{height:100%;border-radius:100px;background:linear-gradient(90deg,#22D3EE,#67E8F9);transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
 .h-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;position:relative;z-index:1;}
 .h-stat{background:rgba(255,255,255,0.09);border-radius:14px;padding:12px 10px;backdrop-filter:blur(8px);}
 .h-stat-val{font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.03em;}
@@ -400,7 +410,7 @@ button,input,textarea,select{font-family:inherit;}
 .day-chip{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;flex-shrink:0;width:44px;}
 .day-chip-inner{width:44px;height:56px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:2px solid transparent;transition:all 0.15s;background:#fff;}
 .day-chip-inner.today{border-color:#2563EB;background:#EFF6FF;}
-.day-chip-inner.viewing{border-color:#F59E0B;background:#FEF3C7;}
+.day-chip-inner.viewing{border-color:#0E8AA0;background:#E0F7FA;}
 .day-chip-dow{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#94A3B8;}
 .day-chip-num{font-size:16px;font-weight:800;color:#0B1929;line-height:1;}
 .day-chip-inner.today .day-chip-dow{color:#2563EB;}
@@ -1735,7 +1745,7 @@ export default function App() {
               {/* Viewing past week */}
               {viewingPlanWeek && planArchive[viewingPlanWeek] && (
                 <>
-                  <div style={{background:"linear-gradient(135deg,#FEF3C7,#FDE68A)",borderRadius:14,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{background:"linear-gradient(135deg,#E0F7FA,#B2EBF2)",borderRadius:14,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                     <div style={{fontSize:13,fontWeight:700,color:"#92400E"}}>📅 Viewing {viewingPlanWeek}</div>
                     <button onClick={()=>setViewingPlanWeek(null)} style={{background:"none",border:"none",fontSize:12,fontWeight:800,color:"#B45309",cursor:"pointer"}}>Back ›</button>
                   </div>
