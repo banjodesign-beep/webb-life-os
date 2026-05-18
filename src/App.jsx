@@ -656,6 +656,29 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 .trip-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;margin-bottom:12px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .trip-row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid rgba(35,181,211,0.07);}
 .trip-row:last-child{border-bottom:none;}
+/* CATEGORIES */
+.cat-pills{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;scrollbar-width:none;}
+.cat-pills::-webkit-scrollbar{display:none;}
+.cat-pill{display:flex;align-items:center;gap:5px;padding:7px 13px;border-radius:100px;border:1.5px solid rgba(35,181,211,0.2);background:#FFFFFF;color:#4A7080;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all 0.15s;flex-shrink:0;}
+.cat-pill.active{border-color:#23B5D3;background:#EAF7FB;color:#071013;}
+.cat-pill-count{background:#23B5D3;color:#FFFFFF;font-size:9px;font-weight:800;border-radius:100px;padding:1px 6px;min-width:16px;text-align:center;}
+.cat-add-form{display:flex;gap:8px;margin-bottom:10px;align-items:center;}
+.cat-name-input{flex:1;background:#FFFFFF;border:1.5px solid #23B5D3;border-radius:10px;padding:10px 14px;font-size:14px;color:#071013;outline:none;}
+.cat-name-input::placeholder{color:#A2AEBB;}
+.cat-add-confirm{padding:10px 16px;background:#23B5D3;border:none;border-radius:8px;color:#FFFFFF;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;letter-spacing:0.06em;text-transform:uppercase;}
+.cat-add-cancel{padding:10px;background:none;border:none;color:#A2AEBB;font-size:16px;cursor:pointer;}
+.cat-section{margin-bottom:4px;}
+.cat-header{display:flex;align-items:center;gap:8px;padding:11px 16px;background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;cursor:pointer;transition:all 0.15s;box-shadow:0 1px 4px rgba(7,16,19,0.04);}
+.cat-section:has(.check-card) .cat-header{border-radius:14px 14px 0 0;border-bottom:none;}
+.cat-header:active{background:#F5FAFB;}
+.cat-chevron{flex-shrink:0;transition:transform 0.2s ease;display:flex;align-items:center;}
+.cat-header-name{font-size:13px;font-weight:700;color:#071013;letter-spacing:0.02em;}
+.cat-rename-input{flex:1;border:none;border-bottom:2px solid #23B5D3;background:transparent;font-size:13px;font-weight:700;color:#071013;outline:none;padding-bottom:2px;}
+.cat-collapsed-badge{font-size:10px;font-weight:700;color:#7A9AAA;background:rgba(35,181,211,0.08);padding:3px 8px;border-radius:100px;white-space:nowrap;}
+.cat-clear-btn{font-size:10px;font-weight:800;color:#A2AEBB;background:none;border:none;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;}
+.cat-del-btn{font-size:14px;color:#A2AEBB;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;}
+.cat-del-btn:hover{color:#EF4444;}
+
 `;
 
 
@@ -729,6 +752,11 @@ export default function App() {
   const [showFinForm, setShowFinForm] = useState(false);
   const [todos,       setTodos]       = useState([]);
   const [todoInput,   setTodoInput]   = useState("");
+  const [categories,  setCategories]  = useState([{id:"cat-default",name:"General",collapsed:false}]);
+  const [activeCatId, setActiveCatId] = useState("cat-default");
+  const [addingCat,   setAddingCat]   = useState(false);
+  const [newCatName,  setNewCatName]  = useState("");
+  const [editCatId,   setEditCatId]   = useState(null);
   const [totalXP,     setTotalXP]     = useState(0);
   const [streaks,     setStreaks]     = useState({current:0,longest:0,lastDate:null,totalDays:0,sabbaths:0,practiceSessions:0,friendDinners:0,tripCount:0});
   const [avatar,      setAvatar]      = useState(null);   // base64 data URL
@@ -781,6 +809,8 @@ export default function App() {
         if(tod) setTodos(tod);     if(cl)  setCustomLists(cl);
         if(hist)setHistory(hist);
         const av = await load("wb-avatar"); if(av) setAvatar(av);
+        const cats = await load("wb-categories-v1");
+        if(cats && cats.length>0) setCategories(cats);
       } catch(e){console.error("Load error:",e);}
       setLoading(false);
     }
@@ -985,7 +1015,30 @@ export default function App() {
   const addFriend=async()=>{if(!friendInput.name.trim())return;const e={id:`f-${Date.now()}`,name:friendInput.name.trim(),note:friendInput.note.trim(),date:new Date().toISOString()};const nl=[e,...friendLog];setFriendLog(nl);await save("wb-friends-v2",nl);const nst={...streaks,friendDinners:(streaks.friendDinners||0)+1};setStreaks(nst);await save("wb-streaks-v4",nst);const nxp=totalXP+15;setTotalXP(nxp);await save("wb-totalxp",nxp);setFriendInput({name:"",note:""});setShowFF(false);showToast(`👥 ${e.name} logged +15 pts`);};
 
   // ── TODOS ────────────────────────────────────────────────────────────
-  const addTodo=async()=>{if(!todoInput.trim())return;const u=[...todos,{id:`t-${Date.now()}`,text:todoInput.trim(),done:false}];setTodos(u);await save("wb-todos-v1",u);setTodoInput("");};
+  const saveCats = async(cats) => { setCategories(cats); await save("wb-categories-v1", cats); };
+  const addCategory = async() => {
+    if(!newCatName.trim()) return;
+    const nc = [...categories, {id:`cat-${Date.now()}`,name:newCatName.trim(),collapsed:false}];
+    await saveCats(nc); setNewCatName(""); setAddingCat(false); setActiveCatId(nc[nc.length-1].id);
+  };
+  const toggleCatCollapse = async(id) => {
+    const nc = categories.map(c=>c.id===id?{...c,collapsed:!c.collapsed}:c);
+    await saveCats(nc);
+  };
+  const deleteCategory = async(id) => {
+    if(id==="cat-default") return;
+    // Move tasks in deleted cat to General
+    const moved = todos.map(t=>t.categoryId===id?{...t,categoryId:"cat-default"}:t);
+    setTodos(moved); await save("wb-todos-v1",moved);
+    const nc = categories.filter(c=>c.id!==id);
+    await saveCats(nc);
+    if(activeCatId===id) setActiveCatId("cat-default");
+  };
+  const renameCategory = async(id, name) => {
+    const nc = categories.map(c=>c.id===id?{...c,name}:c);
+    await saveCats(nc); setEditCatId(null);
+  };
+  const addTodo=async()=>{if(!todoInput.trim())return;const u=[...todos,{id:`t-${Date.now()}`,text:todoInput.trim(),done:false,categoryId:activeCatId}];setTodos(u);await save("wb-todos-v1",u);setTodoInput("");};
   const toggleTodo=async(id)=>{const u=todos.map(t=>t.id===id?{...t,done:!t.done}:t);setTodos(u);await save("wb-todos-v1",u);};
   const deleteTodo=async(id)=>{const u=todos.filter(t=>t.id!==id);setTodos(u);await save("wb-todos-v1",u);};
 
@@ -1264,27 +1317,108 @@ export default function App() {
                   <div className="sec"><div className="sec-title">{todayMode==="sunday"?"Sunday":todayMode==="saturday"?"Saturday":travelMode?"Travel":"Daily"}</div><div className="sec-sub">{Object.values(todayState).filter(v=>v?.checked).length}/{todayItems.length} done</div></div>
                   <CheckGroup items={todayItems} state={todayState} onToggle={handleToggle} bouncing={bouncing} travel={travelMode}/>
 
+                  {/* ── TASKS WITH CATEGORIES ── */}
                   <div className="sec">
                     <div className="sec-title">Tasks</div>
-                    {todos.filter(t=>t.done).length>0&&<button onClick={async()=>{const u=todos.filter(t=>!t.done);setTodos(u);await save("wb-todos-v1",u);}} style={{background:"none",border:"none",fontSize:12,fontWeight:700,color:"#94A3B8",cursor:"pointer"}}>Clear done</button>}
+                    <button onClick={()=>setAddingCat(true)} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#23B5D3",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>+ Category</button>
                   </div>
-                  <div className="todo-input-row">
-                    <input className="todo-input" placeholder="Add a task…" value={todoInput} onChange={e=>setTodoInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTodo()}/>
-                    <button className="todo-add-btn" onClick={addTodo}>+</button>
-                  </div>
-                  {todos.length>0&&(
-                    <div className="check-card">
-                      {todos.map(todo=>(
-                        <div key={todo.id} className="c-row">
-                          <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
-                          <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
-                            <div className="c-main" style={{color:todo.done?"#CBD5E1":"#0B1929",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
-                          </div>
-                          <button className="todo-del" onClick={()=>deleteTodo(todo.id)}>×</button>
-                        </div>
-                      ))}
+
+                  {/* Add category form */}
+                  {addingCat&&(
+                    <div className="cat-add-form">
+                      <input
+                        className="cat-name-input"
+                        placeholder="Category name…"
+                        value={newCatName}
+                        onChange={e=>setNewCatName(e.target.value)}
+                        onKeyDown={e=>{if(e.key==="Enter")addCategory();if(e.key==="Escape"){setAddingCat(false);setNewCatName("");}}}
+                        autoFocus
+                      />
+                      <button onClick={addCategory} className="cat-add-confirm">Add</button>
+                      <button onClick={()=>{setAddingCat(false);setNewCatName("");}} className="cat-add-cancel">✕</button>
                     </div>
                   )}
+
+                  {/* Category selector pills */}
+                  <div className="cat-pills">
+                    {categories.map(cat=>(
+                      <button key={cat.id} className={"cat-pill"+(activeCatId===cat.id?" active":"")} onClick={()=>setActiveCatId(cat.id)}>
+                        {cat.name}
+                        {todos.filter(t=>t.categoryId===cat.id&&!t.done).length>0&&(
+                          <span className="cat-pill-count">{todos.filter(t=>t.categoryId===cat.id&&!t.done).length}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Task input for active category */}
+                  <div className="todo-input-row">
+                    <input className="todo-input" placeholder={`Add to ${categories.find(c=>c.id===activeCatId)?.name||"General"}…`} value={todoInput} onChange={e=>setTodoInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTodo()}/>
+                    <button className="todo-add-btn" onClick={addTodo}>+</button>
+                  </div>
+
+                  {/* Categories with collapsible task lists */}
+                  {categories.map(cat=>{
+                    const catTodos = todos.filter(t=>(t.categoryId||"cat-default")===cat.id);
+                    const doneCnt = catTodos.filter(t=>t.done).length;
+                    const total = catTodos.length;
+                    if(total===0 && activeCatId!==cat.id) return null;
+                    return(
+                      <div key={cat.id} className="cat-section">
+                        {/* Category header */}
+                        <div className="cat-header" onClick={()=>toggleCatCollapse(cat.id)}>
+                          <div className="cat-chevron" style={{transform:cat.collapsed?"rotate(-90deg)":"rotate(0deg)"}}>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#A2AEBB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="2 4 6 8 10 4"/>
+                            </svg>
+                          </div>
+                          {editCatId===cat.id?(
+                            <input
+                              className="cat-rename-input"
+                              defaultValue={cat.name}
+                              autoFocus
+                              onBlur={e=>renameCategory(cat.id, e.target.value||cat.name)}
+                              onKeyDown={e=>{if(e.key==="Enter")renameCategory(cat.id,e.target.value||cat.name);if(e.key==="Escape")setEditCatId(null);}}
+                              onClick={e=>e.stopPropagation()}
+                            />
+                          ):(
+                            <div className="cat-header-name" onDoubleClick={e=>{e.stopPropagation();setEditCatId(cat.id);}}>{cat.name}</div>
+                          )}
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:"auto"}}>
+                            {cat.collapsed&&total>0&&(
+                              <span className="cat-collapsed-badge">{total-doneCnt} remaining</span>
+                            )}
+                            {doneCnt>0&&!cat.collapsed&&(
+                              <button onClick={async e=>{e.stopPropagation();const u=todos.filter(t=>!((t.categoryId||"cat-default")===cat.id&&t.done));setTodos(u);await save("wb-todos-v1",u);}} className="cat-clear-btn">Clear done</button>
+                            )}
+                            {cat.id!=="cat-default"&&(
+                              <button onClick={async e=>{e.stopPropagation();if(window.confirm&&window.confirm("Delete this category?"))deleteCategory(cat.id);else deleteCategory(cat.id);}} className="cat-del-btn">✕</button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Tasks list */}
+                        {!cat.collapsed&&(
+                          <div className="check-card" style={{marginTop:0,borderRadius:"0 0 14px 14px",borderTop:"none"}}>
+                            {catTodos.length===0&&(
+                              <div style={{padding:"16px 18px",fontSize:13,color:"#A2AEBB",fontStyle:"italic"}}>
+                                No tasks yet — type above to add one
+                              </div>
+                            )}
+                            {catTodos.map(todo=>(
+                              <div key={todo.id} className="c-row">
+                                <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
+                                <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
+                                  <div className="c-main" style={{color:todo.done?"#A2AEBB":"#071013",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
+                                </div>
+                                <button className="todo-del" onClick={()=>deleteTodo(todo.id)}>×</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="col323-footer">
                     <div className="col323-verse">"Whatever you do, work at it with all your heart, as working for the Lord, not for human masters."</div>
                     <div className="col323-ref">Colossians 3:23 · The Webb Family Verse</div>
