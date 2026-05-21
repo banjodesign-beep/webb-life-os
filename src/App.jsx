@@ -814,8 +814,8 @@ export default function App() {
         if(hist)setHistory(hist);
         const av = await load("wb-avatar"); if(av) setAvatar(av);
         const cats = await load("wb-categories-v1");
-        const pl = await load(`wb-protein-${todayKey()}`); if(pl) setProteinLog(pl);
-        const wl = await load(`wb-workouts-${weekKey()}`); if(wl) setWorkoutLog(wl);
+        const proteinData = await load(`wb-protein-${todayKey()}`); if(proteinData) setProteinLog(proteinData);
+        const workoutData = await load(`wb-workouts-${weekKey()}`); if(workoutData) setWorkoutLog(workoutData);
         if(cats && cats.length>0) setCategories(cats);
       } catch(e){console.error("Load error:",e);}
       setLoading(false);
