@@ -760,6 +760,10 @@ export default function App() {
   const [totalXP,     setTotalXP]     = useState(0);
   const [streaks,     setStreaks]     = useState({current:0,longest:0,lastDate:null,totalDays:0,sabbaths:0,practiceSessions:0,friendDinners:0,tripCount:0});
   const [avatar,      setAvatar]      = useState(null);   // base64 data URL
+  // Health
+  const [proteinLog,  setProteinLog]  = useState([]);   // [{id,label,grams,at}] — today only
+  const [workoutLog,  setWorkoutLog]  = useState({});   // {dateKey: {type,at}}
+  const [proteinTarget] = useState(200);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const avatarInputRef = useRef(null);
   const [unlockedAch, setUnlockedAch] = useState({});
@@ -810,6 +814,8 @@ export default function App() {
         if(hist)setHistory(hist);
         const av = await load("wb-avatar"); if(av) setAvatar(av);
         const cats = await load("wb-categories-v1");
+        const pl = await load(`wb-protein-${todayKey()}`); if(pl) setProteinLog(pl);
+        const wl = await load(`wb-workouts-${weekKey()}`); if(wl) setWorkoutLog(wl);
         if(cats && cats.length>0) setCategories(cats);
       } catch(e){console.error("Load error:",e);}
       setLoading(false);
@@ -1015,6 +1021,54 @@ export default function App() {
   const addFriend=async()=>{if(!friendInput.name.trim())return;const e={id:`f-${Date.now()}`,name:friendInput.name.trim(),note:friendInput.note.trim(),date:new Date().toISOString()};const nl=[e,...friendLog];setFriendLog(nl);await save("wb-friends-v2",nl);const nst={...streaks,friendDinners:(streaks.friendDinners||0)+1};setStreaks(nst);await save("wb-streaks-v4",nst);const nxp=totalXP+15;setTotalXP(nxp);await save("wb-totalxp",nxp);setFriendInput({name:"",note:""});setShowFF(false);showToast(`👥 ${e.name} logged +15 pts`);};
 
   // ── TODOS ────────────────────────────────────────────────────────────
+  // ── HEALTH ────────────────────────────────────────────────────────
+  const PROTEIN_PRESETS = [
+    {label:"Chicken breast",grams:31,icon:"🍗"},
+    {label:"Eggs (×1)",grams:6,icon:"🥚"},
+    {label:"Protein shake",grams:25,icon:"🥤"},
+    {label:"Tuna (can)",grams:27,icon:"🐟"},
+    {label:"Turkey breast",grams:29,icon:"🦃"},
+    {label:"Steak",grams:26,icon:"🥩"},
+    {label:"Custom",grams:0,icon:"✏️"},
+  ];
+  const WORKOUT_TYPES = ["Lift","Run","Walk","Sport","HIIT","Other"];
+  const [customGrams, setCustomGrams] = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+
+  const todayProtein = proteinLog.reduce((s,e)=>s+e.grams,0);
+
+  const logProtein = async(preset) => {
+    if(preset.grams===0){setShowCustom(true);return;}
+    const entry = {id:`p-${Date.now()}`,label:preset.label,grams:preset.grams,at:new Date().toISOString()};
+    const nl = [...proteinLog, entry];
+    setProteinLog(nl); await save(`wb-protein-${todayKey()}`, nl);
+    showToast(`+${preset.grams}g protein`);
+  };
+  const logCustomProtein = async() => {
+    const g = parseInt(customGrams);
+    if(!g||g<=0) return;
+    const entry = {id:`p-${Date.now()}`,label:`Custom`,grams:g,at:new Date().toISOString()};
+    const nl = [...proteinLog, entry];
+    setProteinLog(nl); await save(`wb-protein-${todayKey()}`, nl);
+    setCustomGrams(""); setShowCustom(false);
+    showToast(`+${g}g protein`);
+  };
+  const deleteProteinEntry = async(id) => {
+    const nl = proteinLog.filter(e=>e.id!==id);
+    setProteinLog(nl); await save(`wb-protein-${todayKey()}`, nl);
+  };
+
+  const logWorkout = async(dayKey, type) => {
+    const nw = {...workoutLog, [dayKey]:{type,at:new Date().toISOString()}};
+    setWorkoutLog(nw); await save(`wb-workouts-${weekKey()}`, nw);
+    const nxp=totalXP+20; setTotalXP(nxp); await save("wb-totalxp",nxp);
+    showToast(`💪 ${type} logged +20 pts`);
+  };
+  const removeWorkout = async(dayKey) => {
+    const nw = {...workoutLog}; delete nw[dayKey];
+    setWorkoutLog(nw); await save(`wb-workouts-${weekKey()}`, nw);
+  };
+
   const saveCats = async(cats) => { setCategories(cats); await save("wb-categories-v1", cats); };
   const addCategory = async() => {
     if(!newCatName.trim()) return;
@@ -1904,6 +1958,185 @@ export default function App() {
               </div>
             </>
           )}
+
+          {/* ══ HEALTH ══════════════════════════════════════════════════ */}
+          {tab==="health"&&(
+            <>
+              {/* PROTEIN HERO */}
+              <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
+                <div style={{position:"absolute",top:-40,right:-30,width:160,height:160,background:"radial-gradient(circle,rgba(35,181,211,0.1),transparent 70%)"}}/>
+                <div style={{position:"relative",zIndex:1}}>
+                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:12}}>Daily Protein</div>
+                  <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:16}}>
+                    {/* Ring */}
+                    <div style={{position:"relative",width:80,height:80,flexShrink:0}}>
+                      <svg viewBox="0 0 80 80" style={{transform:"rotate(-90deg)"}}>
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="7"/>
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="#23B5D3" strokeWidth="7"
+                          strokeDasharray={`${Math.min(todayProtein/proteinTarget,1)*213.6} 213.6`}
+                          strokeLinecap="round"/>
+                      </svg>
+                      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                        <div style={{fontSize:18,fontWeight:900,color:"#FFFFFF",lineHeight:1}}>{todayProtein}</div>
+                        <div style={{fontSize:8,fontWeight:700,color:"rgba(255,255,255,0.4)",letterSpacing:"0.08em"}}>/ {proteinTarget}g</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:32,fontWeight:900,color:"#FFFFFF",letterSpacing:"-0.03em",lineHeight:1}}>{Math.round((todayProtein/proteinTarget)*100)}%</div>
+                      <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:4}}>{proteinTarget-todayProtein>0?`${proteinTarget-todayProtein}g to go`:"Target hit ✓"}</div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#23B5D3",marginTop:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>{proteinLog.length} entries today</div>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div style={{height:2,background:"rgba(255,255,255,0.1)",borderRadius:0,overflow:"hidden"}}>
+                    <div style={{height:"100%",background:"linear-gradient(90deg,#23B5D3,#75ABBC)",width:`${Math.min((todayProtein/proteinTarget)*100,100)}%`,transition:"width 0.6s"}}/>
+                  </div>
+                </div>
+              </div>
+
+              {/* QUICK ADD */}
+              <div className="sec"><div className="sec-title">Quick Add</div><div className="sec-sub">Tap to log</div></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                {PROTEIN_PRESETS.filter(p=>p.grams>0).map(p=>(
+                  <button key={p.label} onClick={()=>logProtein(p)} style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:12,padding:"12px 8px",cursor:"pointer",transition:"all 0.15s",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",textAlign:"center"}}>
+                    <div style={{fontSize:22,marginBottom:4}}>{p.icon}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:"#071013",lineHeight:1.2,marginBottom:2}}>{p.label}</div>
+                    <div style={{fontSize:12,fontWeight:800,color:"#23B5D3"}}>{p.grams}g</div>
+                  </button>
+                ))}
+                <button onClick={()=>setShowCustom(p=>!p)} style={{background:showCustom?"#EAF7FB":"#FFFFFF",border:`1.5px ${showCustom?"solid #23B5D3":"solid rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"12px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)"}}>
+                  <div style={{fontSize:22,marginBottom:4}}>✏️</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#071013",marginBottom:2}}>Custom</div>
+                  <div style={{fontSize:11,color:"#A2AEBB"}}>any amount</div>
+                </button>
+              </div>
+
+              {/* CUSTOM INPUT */}
+              {showCustom&&(
+                <div style={{background:"#FFFFFF",border:"1.5px solid #23B5D3",borderRadius:12,padding:"14px 16px",marginBottom:12,display:"flex",gap:10,alignItems:"center",boxShadow:"0 0 0 3px rgba(35,181,211,0.1)"}}>
+                  <input
+                    type="number" placeholder="Enter grams…"
+                    value={customGrams} onChange={e=>setCustomGrams(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&logCustomProtein()}
+                    style={{flex:1,border:"none",outline:"none",fontSize:17,fontWeight:700,color:"#071013",background:"transparent"}}
+                    autoFocus
+                  />
+                  <span style={{fontSize:14,fontWeight:700,color:"#A2AEBB"}}>g</span>
+                  <button onClick={logCustomProtein} style={{background:"#23B5D3",border:"none",borderRadius:8,padding:"9px 16px",color:"#FFFFFF",fontSize:13,fontWeight:800,cursor:"pointer"}}>Add</button>
+                  <button onClick={()=>{setShowCustom(false);setCustomGrams("");}} style={{background:"none",border:"none",color:"#A2AEBB",fontSize:18,cursor:"pointer"}}>✕</button>
+                </div>
+              )}
+
+              {/* TODAY'S LOG */}
+              {proteinLog.length>0&&(
+                <>
+                  <div className="sec"><div className="sec-title">Today's Log</div><button onClick={async()=>{setProteinLog([]);await save(`wb-protein-${todayKey()}`,[]);}} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#A2AEBB",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>Clear all</button></div>
+                  <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,overflow:"hidden",marginBottom:16,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
+                    {proteinLog.map((e,i)=>(
+                      <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<proteinLog.length-1?"1px solid rgba(35,181,211,0.07)":"none"}}>
+                        <div style={{width:36,height:36,borderRadius:8,background:"#EAF7FB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                          {PROTEIN_PRESETS.find(p=>p.label===e.label)?.icon||"🍽️"}
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:14,fontWeight:600,color:"#071013"}}>{e.label}</div>
+                          <div style={{fontSize:11,color:"#A2AEBB",marginTop:1}}>{new Date(e.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+                        </div>
+                        <div style={{fontSize:15,fontWeight:800,color:"#23B5D3",marginRight:4}}>{e.grams}g</div>
+                        <button onClick={()=>deleteProteinEntry(e.id)} style={{background:"none",border:"none",color:"#DFE0E2",fontSize:18,cursor:"pointer",padding:"2px 4px",lineHeight:1}}>×</button>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:"rgba(35,181,211,0.04)",borderTop:"1px solid rgba(35,181,211,0.1)"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:"#4A7080",letterSpacing:"0.08em",textTransform:"uppercase"}}>Total Today</div>
+                      <div style={{fontSize:18,fontWeight:900,color:"#23B5D3"}}>{todayProtein}g <span style={{fontSize:12,color:"#A2AEBB",fontWeight:600}}>/ {proteinTarget}g</span></div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* WORKOUT SECTION */}
+              <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
+                <div style={{position:"relative",zIndex:1}}>
+                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>This Week</div>
+                  <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}>
+                    <div style={{fontSize:48,fontWeight:900,color:"#FFFFFF",lineHeight:1,letterSpacing:"-0.04em"}}>{Object.keys(workoutLog).length}</div>
+                    <div style={{fontSize:14,color:"rgba(255,255,255,0.4)"}}>of 3 workouts</div>
+                  </div>
+                  <div style={{height:2,background:"rgba(255,255,255,0.1)",marginBottom:16,overflow:"hidden"}}>
+                    <div style={{height:"100%",background:"linear-gradient(90deg,#23B5D3,#75ABBC)",width:`${Math.min((Object.keys(workoutLog).length/3)*100,100)}%`,transition:"width 0.6s"}}/>
+                  </div>
+                  {/* Weekly grid */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
+                    {["M","T","W","T","F","S","S"].map((d,i)=>{
+                      const date = new Date();
+                      const dayOfWeek = date.getDay();
+                      const mondayOffset = (dayOfWeek===0?-6:1-dayOfWeek);
+                      const dayDate = new Date(date);
+                      dayDate.setDate(date.getDate()+mondayOffset+i);
+                      const dk = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,"0")}-${String(dayDate.getDate()).padStart(2,"0")}`;
+                      const done = workoutLog[dk];
+                      const isToday = dk===todayKey();
+                      return(
+                        <div key={i} style={{textAlign:"center"}}>
+                          <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.3)",letterSpacing:"0.1em",marginBottom:4}}>{d}</div>
+                          <div
+                            onClick={()=>{if(done)removeWorkout(dk);else logWorkout(dk,"Lift");}}
+                            style={{
+                              width:"100%",aspectRatio:"1",borderRadius:6,
+                              background:done?"#23B5D3":isToday?"rgba(35,181,211,0.15)":"rgba(255,255,255,0.06)",
+                              border:`1px solid ${done?"#23B5D3":isToday?"rgba(35,181,211,0.4)":"rgba(255,255,255,0.1)"}`,
+                              display:"flex",alignItems:"center",justifyContent:"center",
+                              cursor:"pointer",transition:"all 0.15s",fontSize:10,
+                            }}>
+                            {done?<span style={{fontSize:11,fontWeight:800,color:"#FFFFFF"}}>{done.type.slice(0,1)}</span>:isToday?<span style={{fontSize:9,color:"rgba(35,181,211,0.7)"}}>+</span>:null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* LOG WORKOUT FOR TODAY */}
+              <div className="sec"><div className="sec-title">Log Workout</div><div className="sec-sub">Tap to record today</div></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+                {WORKOUT_TYPES.map(type=>{
+                  const icons={"Lift":"🏋️","Run":"🏃","Walk":"🚶","Sport":"⚽","HIIT":"⚡","Other":"💪"};
+                  const todayDone = workoutLog[todayKey()];
+                  const isLogged = todayDone?.type===type;
+                  return(
+                    <button key={type} onClick={()=>isLogged?removeWorkout(todayKey()):logWorkout(todayKey(),type)}
+                      style={{background:isLogged?"#EAF7FB":"#FFFFFF",border:`1.5px solid ${isLogged?"#23B5D3":"rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"14px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",transition:"all 0.15s"}}>
+                      <div style={{fontSize:24,marginBottom:4}}>{icons[type]}</div>
+                      <div style={{fontSize:12,fontWeight:700,color:isLogged?"#0D6B85":"#071013"}}>{type}</div>
+                      {isLogged&&<div style={{fontSize:9,fontWeight:800,color:"#23B5D3",marginTop:2,letterSpacing:"0.08em"}}>DONE ✓</div>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* MINIMUM PROTOCOL */}
+              <div className="sec"><div className="sec-title">The Protocol</div><div className="sec-sub">When time is short</div></div>
+              <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,padding:18,marginBottom:12,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
+                <div style={{fontSize:13,fontWeight:800,color:"#23B5D3",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>12-Minute Minimum</div>
+                <div style={{fontSize:12,color:"#4A7080",lineHeight:1.7,marginBottom:12}}>When the day closes in, this is non-negotiable. 12 minutes. No equipment. Gets it done.</div>
+                {[["0:00–3:00","5 push-ups, 5 squats, 5 hip hinges × 3 sets. No rest. Get the blood moving."],["3:00–7:00","10 push-ups, 10 lunges (each leg), 10 pike push-ups. One set each."],["7:00–10:00","Max push-ups, max bodyweight squats, 30-sec plank. One round."],["10:00–12:00","Dead hang or doorframe pull-up hold. Finish with 10 slow deep breaths."]].map(([t,d])=>(
+                  <div key={t} style={{display:"flex",gap:12,paddingBottom:10,marginBottom:10,borderBottom:"1px solid rgba(35,181,211,0.07)"}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#23B5D3",letterSpacing:"0.06em",width:56,flexShrink:0,paddingTop:2}}>{t}</div>
+                    <div style={{fontSize:13,color:"#071013",lineHeight:1.6}}>{d}</div>
+                  </div>
+                ))}
+                <div style={{fontSize:11,fontWeight:700,color:"#7A9AAA",fontStyle:"italic",marginTop:4}}>Done is better than perfect. Log it. Streak protected.</div>
+              </div>
+
+              {/* WEEKLY CONSISTENCY TIP */}
+              <div style={{background:"#EAF7FB",border:"1px solid rgba(35,181,211,0.2)",borderRadius:14,padding:16,marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:800,color:"#0D6B85",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>The Real Fix</div>
+                <div style={{fontSize:13,color:"#2A4050",lineHeight:1.7}}>The workout isn't the problem — the schedule is. Block 6:00–6:30am in your calendar as immovable. Before the day exists. Before email. Before anyone needs anything from you. Everything else is a negotiation. This block isn't.</div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* BOTTOM NAV — SVG line icons */}
@@ -1916,6 +2149,7 @@ export default function App() {
             {id:"planner",lbl:"Plan",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 7h8M8 12h8M8 17h5"/></svg>},
             {id:"music",lbl:"Music",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><circle cx="8" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M11 18V7l10-2v9"/></svg>},
             {id:"journal",lbl:"Journal",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>},
+            {id:"health",lbl:"Health",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>},
           ].map(n=>(
             <button key={n.id} className={"nav-btn"+(tab===n.id?" active":"")} onClick={()=>setTab(n.id)}>
               <div className="nav-icon">{n.path}</div>
