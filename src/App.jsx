@@ -808,6 +808,12 @@ export default function App() {
         if(s)   setStreaks(s);      if(ach) setUnlockedAch(ach);
         if(tl)  setTripLog(tl);    if(tm)  setTravelMode(tm);
         if(dest)setTravelDest(dest);
+        // If travel mode was active, also load the travel checklist for today
+        if(tm) {
+          const travelKey = getDayKey(today, "travel");
+          const travelDs = await load(travelKey);
+          if(travelDs) setDayStates(p=>({...p,[travelKey]:travelDs}));
+        }
         if(jrnl){setJournal(jrnl);setJournalInput(jrnl[today]||"");}
         if(wp)  setWeekPlan(wp);   if(pa)  setPlanArchive(pa);
         if(tod) setTodos(tod);     if(cl)  setCustomLists(cl);
