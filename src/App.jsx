@@ -176,6 +176,121 @@ const ACHIEVEMENTS = [
   {id:"a9",icon:"🌍",title:"Legacy Builder",check:s=>s.totalXP>=2500},
 ];
 
+// ── JOURNAL PROMPT SYSTEM ────────────────────────────────────────────
+const JOURNAL_PROMPTS = {
+  faith:[
+    "Where did you see God's hand in the last 24 hours?",
+    "What are you trusting God with right now that feels too big?",
+    "What does surrender look like for you today?",
+    "What is God saying to you that you've been slow to act on?",
+  ],
+  clarity:[
+    "What's one thing pulling at your attention that you haven't dealt with?",
+    "Where are you spending energy that isn't producing anything?",
+    "What decision have you been avoiding? What's the real reason?",
+    "Name one thing that would make this week feel like a win.",
+  ],
+  gratitude:[
+    "Name something from yesterday you want to remember.",
+    "Who showed up for you recently? Have you told them?",
+    "What's working right now that you've stopped noticing?",
+    "What ordinary thing today was actually a gift?",
+  ],
+  family:[
+    "How present were you for Jules today — really?",
+    "What do River and Annie need from you right now that you're not giving?",
+    "When did you last have a real conversation with each of your kids?",
+    "What does Jules need that she hasn't asked for?",
+  ],
+  platform:[
+    "What idea is worth capturing before it disappears?",
+    "What chapter or section is stuck — and what's actually blocking it?",
+    "Who needs to hear what you're building? Have you told them?",
+    "What's one sentence from this week that could open a chapter?",
+  ],
+  challenge:[
+    "What's the hardest thing you faced today and how did you handle it?",
+    "Where did you fall short today? What would you do differently?",
+    "What pattern keeps showing up that you haven't addressed?",
+    "What are you tolerating that you shouldn't be?",
+  ],
+};
+const PROMPT_CATS = [
+  {key:"faith",   label:"Faith",    color:"#23B5D3", icon:"🕊️"},
+  {key:"clarity", label:"Clarity",  color:"#75ABBC", icon:"🔍"},
+  {key:"gratitude",label:"Gratitude",color:"#1A8FA8",icon:"🙏"},
+  {key:"family",  label:"Family",   color:"#A2AEBB", icon:"🏠"},
+  {key:"platform",label:"Platform", color:"#71848F", icon:"✍️"},
+  {key:"challenge",label:"Challenge",color:"#4A7080",icon:"⚡"},
+];
+const getDayPrompt = (dateStr, cat) => {
+  const key = cat || PROMPT_CATS[new Date(dateStr+"T12:00:00").getDay() % PROMPT_CATS.length].key;
+  const prompts = JOURNAL_PROMPTS[key];
+  const idx = Math.floor(new Date(dateStr+"T12:00:00").getDate() / 7) % prompts.length;
+  return {text: prompts[idx], cat: key};
+};
+
+// ── WEEKLY INSIGHT ENGINE ─────────────────────────────────────────────
+const getWeeklyInsights = (history, workoutLog, journal, goals, streaks, proteinTarget) => {
+  const today = new Date();
+  const insights = [];
+  const actions = [];
+
+  // Last 7 days completion
+  const last7 = Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return localDate(d);});
+  const completedDays = last7.filter(d=>history[d]?.pct>=80).length;
+  const avgPct = Math.round(last7.reduce((s,d)=>s+(history[d]?.pct||0),0)/7);
+  const weakDays = last7.filter(d=>history[d]?.pct<40&&history[d]).map(d=>new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"}));
+
+  if(avgPct < 60) {
+    insights.push({type:"warning", title:"Checklist avg: "+avgPct+"%", body:weakDays.length>0?"Lowest on "+weakDays.join(", ")+". Pattern worth investigating.":"Below your 80% target for the week."});
+    actions.push({priority:1, action:"Protect the morning block", detail:"Most slippage happens before 9am. The anchor items — stillness, intention — set the whole day."});
+  } else if(avgPct >= 80) {
+    insights.push({type:"win", title:"Strong week — "+avgPct+"% avg", body:completedDays+" of 7 days at 80%+. That's the standard."});
+  } else {
+    insights.push({type:"neutral", title:"Checklist avg: "+avgPct+"%", body:"Solid but not at your ceiling. "+completedDays+" strong days."});
+  }
+
+  // Workouts
+  const wkCount = Object.keys(workoutLog).length;
+  if(wkCount < 2) {
+    insights.push({type:"warning", title:"Workouts: "+wkCount+" this week", body:"Below your 3× target. The 6am block is the only reliable fix."});
+    actions.push({priority:1, action:"Block 6:00–6:30am tomorrow", detail:"Put it in the calendar now. Before email, before anyone needs anything."});
+  } else if(wkCount >= 3) {
+    insights.push({type:"win", title:"Workouts: "+wkCount+"× this week", body:"On target. Keep the block protected."});
+  }
+
+  // Journal
+  const journalDays = last7.filter(d=>journal[d]?.trim()).length;
+  if(journalDays <= 1) {
+    insights.push({type:"warning", title:"Journal: "+journalDays+" entries last week", body:"Reflection is where the week's data becomes wisdom. One sentence is enough."});
+    actions.push({priority:2, action:"One journal entry today", detail:"Pick a prompt. Write one sentence. The habit builds from consistency, not length."});
+  } else if(journalDays >= 5) {
+    insights.push({type:"win", title:"Journal: "+journalDays+"/7 days", body:"Strong reflection habit. This is where the platform material lives."});
+  }
+
+  // Streak
+  if(streaks.current === 0) {
+    insights.push({type:"warning", title:"Streak reset", body:"Fresh start. Today is day one again."});
+    actions.push({priority:1, action:"Complete today's checklist", detail:"The streak resets to zero but the identity doesn't. One day at a time."});
+  } else if(streaks.current >= 7) {
+    insights.push({type:"win", title:streaks.current+"-day streak", body:"This is compounding. Don't let a busy day break what you've built."});
+  }
+
+  // Stale goals
+  const staleGoals = goals.filter(g=>!g.completed&&g.progress===0&&g.id!=="g7");
+  if(staleGoals.length > 0) {
+    const g = staleGoals[0];
+    insights.push({type:"nudge", title:"Goal with no movement", body:'"'+g.title+'" is still at 0%. Is it still a real priority or should it be removed?'});
+    actions.push({priority:3, action:"Move or remove: "+g.title.slice(0,30)+"…", detail:"A goal that doesn't move creates drag. Either commit 15 minutes to it today or delete it."});
+  }
+
+  // Sort actions by priority
+  actions.sort((a,b)=>a.priority-b.priority);
+
+  return {insights: insights.slice(0,4), actions: actions.slice(0,3), avgPct, wkCount, journalDays, streak:streaks.current};
+};
+
 const STAGE_PCT = {"Not Started":0,"Written":20,"Demo":40,"Recording":60,"Mixing":80,"Complete":100};
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
@@ -656,6 +771,13 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 .trip-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;margin-bottom:12px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .trip-row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid rgba(35,181,211,0.07);}
 .trip-row:last-child{border-bottom:none;}
+/* JOURNAL PROMPTS */
+.prompt-selector{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none;}
+.prompt-selector::-webkit-scrollbar{display:none;}
+/* INSIGHT MODAL */
+.insight-stat{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:10px;padding:12px 8px;text-align:center;}
+.insight-row{display:flex;gap:12px;padding:13px 16px;align-items:flex-start;}
+.insight-badge{width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0;margin-top:1px;}
 /* CATEGORIES */
 .cat-pills{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;scrollbar-width:none;}
 .cat-pills::-webkit-scrollbar{display:none;}
@@ -742,6 +864,9 @@ export default function App() {
   const [journalInput,setJournalInput]= useState("");
   const [jViewDate,   setJViewDate]   = useState(null);
   const [jMonth,      setJMonth]      = useState({y:new Date().getFullYear(),m:new Date().getMonth()+1});
+  const [jPromptCat,  setJPromptCat]  = useState(null);  // null = use day's default
+  const [showInsight, setShowInsight] = useState(false);
+  const [insightDismissed, setInsightDismissed] = useState(false);
   const [weekPlan,    setWeekPlan]    = useState({top3:["","",""],intention:"",gratitude:"",carryForward:""});
   const [planArchive, setPlanArchive] = useState({});
   const [viewPlanWeek,setViewPlanWeek]= useState(null);
@@ -781,7 +906,14 @@ export default function App() {
 
   // ── LOAD ─────────────────────────────────────────────────────────────
   useEffect(()=>{
-    async function loadAll() {
+    // Debounce map for saves
+  const saveTimers = useRef({});
+  const debouncedSave = useCallback((key, value, delay=600) => {
+    if(saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+    saveTimers.current[key] = setTimeout(()=>{ save(key, value); }, delay);
+  }, []);
+
+  async function loadAll() {
       const today = todayKey();
       const mode  = getModeForDate(today);
       const dkey  = getDayKey(today, mode);
@@ -818,6 +950,13 @@ export default function App() {
         if(wp)  setWeekPlan(wp);   if(pa)  setPlanArchive(pa);
         if(tod) setTodos(tod);     if(cl)  setCustomLists(cl);
         if(hist)setHistory(hist);
+        // Show weekly insight on Monday or first open of new week
+        const lastInsight = await load("wb-last-insight");
+        const todayD = new Date();
+        const thisWeek = weekKey();
+        if(todayD.getDay()===1 && lastInsight!==thisWeek) {
+          setTimeout(()=>setShowInsight(true), 3500); // after splash
+        }
         const av = await load("wb-avatar"); if(av) setAvatar(av);
         const cats = await load("wb-categories-v1");
         const proteinData = await load(`wb-protein-${todayKey()}`); if(proteinData) setProteinLog(proteinData);
@@ -1003,8 +1142,14 @@ export default function App() {
 
   // ── JOURNAL ──────────────────────────────────────────────────────────
   const saveJournalEntry=async(text)=>{
+    const wasEmpty = !journal[today]?.trim();
     setJournalInput(text);
-    const upd={...journal,[today]:text};setJournal(upd);await save(`wb-journal-${yearKey()}`,upd);
+    const upd={...journal,[today]:text};setJournal(upd);debouncedSave(`wb-journal-${yearKey()}`,upd,800);
+    // Award XP for first entry of the day
+    if(wasEmpty && text.trim().length > 10) {
+      const nxp=totalXP+15; setTotalXP(nxp); await save("wb-totalxp",nxp);
+      showToast("📓 Journal entry +15 pts");
+    }
   };
 
   // ── GOALS ────────────────────────────────────────────────────────────
@@ -1165,6 +1310,72 @@ export default function App() {
       {xpFloat!==null && <XPFloat amount={xpFloat} onDone={()=>setXpFloat(null)}/>}
       {toast && <div key={toastKey} className="toast">{toast}</div>}
 
+      {/* ── WEEKLY INSIGHT MODAL ── */}
+      {showInsight&&(()=>{
+        const {insights,actions,avgPct,wkCount,journalDays,streak} = getWeeklyInsights(history,workoutLog,journal,goals,streaks,proteinTarget);
+        const typeColor = {win:"#23B5D3",warning:"#E8A04A",nudge:"#A2AEBB",neutral:"#75ABBC"};
+        const typeIcon  = {win:"✓",warning:"!",nudge:"→",neutral:"·"};
+        return(
+          <div style={{position:"fixed",inset:0,background:"rgba(7,16,19,0.85)",zIndex:400,display:"flex",alignItems:"flex-end",padding:"0 0 env(safe-area-inset-bottom)"}}>
+            <div style={{background:"#F5FAFB",borderRadius:"20px 20px 0 0",width:"100%",maxHeight:"88vh",overflowY:"auto",padding:"28px 20px 32px",borderTop:"1px solid rgba(35,181,211,0.2)"}}>
+              {/* Header */}
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20}}>
+                <div>
+                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"#23B5D3",marginBottom:4}}>Weekly Review</div>
+                  <div style={{fontSize:22,fontWeight:900,color:"#071013",letterSpacing:"-0.02em"}}>Where you stand</div>
+                </div>
+                <button onClick={async()=>{setShowInsight(false);setInsightDismissed(true);await save("wb-last-insight",weekKey());}} style={{background:"rgba(35,181,211,0.1)",border:"none",borderRadius:8,width:34,height:34,cursor:"pointer",fontSize:16,color:"#4A7080",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+              </div>
+
+              {/* Stats row */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:20}}>
+                {[["Avg",avgPct+"%"],["Workouts",wkCount+"/3"],["Journal",journalDays+"/7"],["Streak",streak+"d"]].map(([l,v])=>(
+                  <div key={l} style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:10,padding:"12px 8px",textAlign:"center"}}>
+                    <div style={{fontSize:18,fontWeight:900,color:"#071013",letterSpacing:"-0.02em"}}>{v}</div>
+                    <div style={{fontSize:8,fontWeight:800,color:"#A2AEBB",textTransform:"uppercase",letterSpacing:"0.12em",marginTop:2}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Insights */}
+              <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.18em",textTransform:"uppercase",color:"#A2AEBB",marginBottom:8}}>Last 7 Days</div>
+              <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,overflow:"hidden",marginBottom:20}}>
+                {insights.map((ins,i)=>(
+                  <div key={i} style={{display:"flex",gap:12,padding:"13px 16px",borderBottom:i<insights.length-1?"1px solid rgba(35,181,211,0.07)":"none",alignItems:"flex-start"}}>
+                    <div style={{width:22,height:22,borderRadius:5,background:typeColor[ins.type]+"20",border:`1px solid ${typeColor[ins.type]}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:typeColor[ins.type],flexShrink:0,marginTop:1}}>{typeIcon[ins.type]}</div>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:"#071013",marginBottom:2}}>{ins.title}</div>
+                      <div style={{fontSize:12,color:"#4A7080",lineHeight:1.5}}>{ins.body}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Prioritized actions */}
+              {actions.length>0&&(
+                <>
+                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.18em",textTransform:"uppercase",color:"#A2AEBB",marginBottom:8}}>This Week — Do These</div>
+                  <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,overflow:"hidden",marginBottom:20}}>
+                    {actions.map((a,i)=>(
+                      <div key={i} style={{display:"flex",gap:12,padding:"14px 16px",borderBottom:i<actions.length-1?"1px solid rgba(35,181,211,0.07)":"none",alignItems:"flex-start"}}>
+                        <div style={{width:22,height:22,borderRadius:"50%",background:"#23B5D3",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:"#FFFFFF",flexShrink:0,marginTop:1}}>{i+1}</div>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:800,color:"#071013",marginBottom:3}}>{a.action}</div>
+                          <div style={{fontSize:12,color:"#4A7080",lineHeight:1.5}}>{a.detail}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <button onClick={async()=>{setShowInsight(false);setInsightDismissed(true);await save("wb-last-insight",weekKey());}} style={{width:"100%",padding:15,background:"#23B5D3",border:"none",borderRadius:10,color:"#FFFFFF",fontSize:14,fontWeight:800,cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>Got it — let's go</button>
+              <button onClick={()=>setShowInsight(false)} style={{width:"100%",padding:10,border:"none",background:"transparent",color:"#A2AEBB",fontSize:12,cursor:"pointer",marginTop:6}}>Remind me later</button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* TRAVEL MODAL */}
       {showTM&&(
         <div className="modal-overlay" onClick={()=>setShowTM(false)}>
@@ -1320,6 +1531,46 @@ export default function App() {
                 <div className="xp-row"><div className="xp-level">Level {levelInfo.l} — {levelInfo.t}</div><div className="xp-pts">{totalXP} pts</div></div>
                 <div className="xp-track"><div className="xp-fill" style={{width:`${levelInfo.progress}%`}}/></div>
               </div>
+
+              {/* HEALTH MINI WIDGET */}
+              {!viewDate&&(
+                <div style={{display:"flex",gap:8,marginBottom:12}}>
+                  {/* Protein mini */}
+                  <div onClick={()=>setTab("health")} style={{flex:1,background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:12,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <svg viewBox="0 0 36 36" width={36} height={36} style={{flexShrink:0}}>
+                      <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(35,181,211,0.12)" strokeWidth="4"/>
+                      <circle cx="18" cy="18" r="14" fill="none" stroke="#23B5D3" strokeWidth="4"
+                        strokeDasharray={`${Math.min(todayProtein/proteinTarget,1)*87.96} 87.96`}
+                        strokeDashoffset="0" strokeLinecap="round"
+                        transform="rotate(-90 18 18)"/>
+                    </svg>
+                    <div>
+                      <div style={{fontSize:16,fontWeight:900,color:"#071013",lineHeight:1}}>{todayProtein}<span style={{fontSize:10,fontWeight:600,color:"#A2AEBB"}}>/{proteinTarget}g</span></div>
+                      <div style={{fontSize:8,fontWeight:800,color:"#A2AEBB",textTransform:"uppercase",letterSpacing:"0.1em",marginTop:2}}>Protein</div>
+                    </div>
+                  </div>
+                  {/* Workout mini */}
+                  <div onClick={()=>setTab("health")} style={{flex:1,background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:12,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{display:"flex",gap:3,flexShrink:0}}>
+                      {[0,1,2].map(i=>{
+                        const done=Object.keys(workoutLog).length>i;
+                        return <div key={i} style={{width:10,height:24,borderRadius:3,background:done?"#23B5D3":"rgba(35,181,211,0.12)"}}/>;
+                      })}
+                    </div>
+                    <div>
+                      <div style={{fontSize:16,fontWeight:900,color:"#071013",lineHeight:1}}>{Object.keys(workoutLog).length}<span style={{fontSize:10,fontWeight:600,color:"#A2AEBB"}}>/3</span></div>
+                      <div style={{fontSize:8,fontWeight:800,color:"#A2AEBB",textTransform:"uppercase",letterSpacing:"0.1em",marginTop:2}}>Workouts</div>
+                    </div>
+                  </div>
+                  {/* Review trigger */}
+                  <div onClick={()=>setShowInsight(true)} style={{background:"#EAF7FB",border:"1px solid rgba(35,181,211,0.2)",borderRadius:12,padding:"10px 12px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,minWidth:52}}>
+                    <svg viewBox="0 0 20 20" width={18} height={18} fill="none" stroke="#23B5D3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
+                    </svg>
+                    <div style={{fontSize:7,fontWeight:800,color:"#23B5D3",textTransform:"uppercase",letterSpacing:"0.1em"}}>Review</div>
+                  </div>
+                </div>
+              )}
 
               {todayMode==="sunday"&&!viewDate&&<div className="mode-badge mode-badge-sun"><span style={{fontSize:18}}>🕊️</span><div><div className="mb-text">Sabbath Sunday</div><div className="mb-sub">Rest, church, presence. Nothing else required.</div></div></div>}
               {todayMode==="saturday"&&!viewDate&&<div className="mode-badge mode-badge-sat"><span style={{fontSize:18}}>🌄</span><div><div className="mb-text">Family Saturday</div><div className="mb-sub">River, Annie, Jules, music. All that matters today.</div></div></div>}
@@ -1893,257 +2144,126 @@ export default function App() {
           {/* ══ JOURNAL ════════════════════════════════════════════════ */}
           {tab==="journal"&&(
             <>
-              {/* Day One-style calendar */}
-              <div style={{background:"rgba(255,255,255,0.42)",backdropFilter:"blur(24px)",border:"1px solid rgba(255,255,255,0.6)",borderRadius:20,padding:18,marginTop:4,marginBottom:14,boxShadow:"0 2px 16px rgba(11,25,41,0.05)"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                  <button onClick={()=>setJMonth(p=>{const d=new Date(p.y,p.m-2,1);return{y:d.getFullYear(),m:d.getMonth()+1};})} style={{background:"none",border:"none",fontSize:20,color:"#64748B",cursor:"pointer",padding:"4px 10px"}}>‹</button>
-                  <div style={{fontSize:16,fontWeight:800,color:"#0B1929"}}>{new Date(jMonth.y,jMonth.m-1,1).toLocaleDateString("en-US",{month:"long",year:"numeric"})}</div>
-                  <button onClick={()=>setJMonth(p=>{const d=new Date(p.y,p.m,1);return{y:d.getFullYear(),m:d.getMonth()+1};})} style={{background:"none",border:"none",fontSize:20,color:"#64748B",cursor:"pointer",padding:"4px 10px"}}>›</button>
+              {/* JOURNAL HEADER with streak */}
+              {(()=>{
+                const entries = Object.keys(journal).filter(d=>journal[d]?.trim());
+                const last7 = Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return localDate(d);});
+                const jStreak7 = last7.filter(d=>journal[d]?.trim()).length;
+                const totalEntries = entries.length;
+                // Calculate consecutive journal streak
+                let jStreak=0;
+                for(let i=0;i<365;i++){const d=new Date();d.setDate(d.getDate()-i);const k=localDate(d);if(journal[k]?.trim())jStreak++;else break;}
+                return(
+                  <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"20px",marginTop:4,marginBottom:14,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
+                    <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
+                    <div style={{position:"relative",zIndex:1}}>
+                      <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:8}}>Journal</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                        <div style={{background:"rgba(255,255,255,0.07)",borderRadius:8,padding:"10px 8px",textAlign:"center"}}>
+                          <div style={{fontSize:24,fontWeight:900,color:"#FFFFFF",lineHeight:1}}>{jStreak}</div>
+                          <div style={{fontSize:8,fontWeight:800,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.1em",marginTop:2}}>Day Streak</div>
+                        </div>
+                        <div style={{background:"rgba(255,255,255,0.07)",borderRadius:8,padding:"10px 8px",textAlign:"center"}}>
+                          <div style={{fontSize:24,fontWeight:900,color:"#FFFFFF",lineHeight:1}}>{jStreak7}</div>
+                          <div style={{fontSize:8,fontWeight:800,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.1em",marginTop:2}}>This Week</div>
+                        </div>
+                        <div style={{background:"rgba(255,255,255,0.07)",borderRadius:8,padding:"10px 8px",textAlign:"center"}}>
+                          <div style={{fontSize:24,fontWeight:900,color:"#FFFFFF",lineHeight:1}}>{totalEntries}</div>
+                          <div style={{fontSize:8,fontWeight:800,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.1em",marginTop:2}}>Total</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* PROMPT CATEGORIES */}
+              <div className="sec"><div className="sec-title">Today's Prompt</div><div className="sec-sub">Pick a category or use today's</div></div>
+              <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:12,scrollbarWidth:"none"}}>
+                <button onClick={()=>setJPromptCat(null)} style={{flexShrink:0,padding:"7px 12px",borderRadius:20,border:`1.5px solid ${jPromptCat===null?"#23B5D3":"rgba(35,181,211,0.2)"}`,background:jPromptCat===null?"#EAF7FB":"#FFFFFF",color:jPromptCat===null?"#071013":"#4A7080",fontSize:11,fontWeight:800,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Today's</button>
+                {PROMPT_CATS.map(pc=>(
+                  <button key={pc.key} onClick={()=>setJPromptCat(pc.key)} style={{flexShrink:0,padding:"7px 12px",borderRadius:20,border:`1.5px solid ${jPromptCat===pc.key?pc.color:"rgba(35,181,211,0.15)"}`,background:jPromptCat===pc.key?"#EAF7FB":"#FFFFFF",color:jPromptCat===pc.key?pc.color:"#4A7080",fontSize:11,fontWeight:800,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>
+                    {pc.icon} {pc.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ACTIVE PROMPT */}
+              {(()=>{
+                const prompt = getDayPrompt(today, jPromptCat);
+                const pc = PROMPT_CATS.find(p=>p.key===prompt.cat)||PROMPT_CATS[0];
+                const hasEntry = journal[today]?.trim();
+                return(
+                  <>
+                    <div style={{background:"#FFFFFF",border:`1px solid ${pc.color}30`,borderLeft:`3px solid ${pc.color}`,borderRadius:"0 12px 12px 0",padding:"14px 16px",marginBottom:12,boxShadow:"0 2px 10px rgba(7,16,19,0.04)"}}>
+                      <div style={{fontSize:9,fontWeight:800,color:pc.color,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:6}}>{pc.icon} {pc.label}</div>
+                      <div style={{fontSize:14,color:"#2A4050",lineHeight:1.65,fontStyle:"italic"}}>"{prompt.text}"</div>
+                    </div>
+                    <textarea
+                      className="journal-input"
+                      rows={hasEntry?6:4}
+                      placeholder={"One sentence is enough. Write what's real."}
+                      value={journalInput}
+                      onChange={e=>saveJournalEntry(e.target.value)}
+                      style={{marginBottom:hasEntry?14:8}}
+                    />
+                    {!hasEntry&&journalInput.length===0&&(
+                      <div style={{fontSize:11,color:"#A2AEBB",textAlign:"center",marginBottom:14,fontStyle:"italic"}}>+15 pts for your first entry today</div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* CALENDAR */}
+              <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,padding:16,marginBottom:14,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                  <button onClick={()=>setJMonth(p=>{const d=new Date(p.y,p.m-2,1);return{y:d.getFullYear(),m:d.getMonth()+1};})} style={{background:"none",border:"none",fontSize:18,color:"#A2AEBB",cursor:"pointer",padding:"2px 8px"}}>‹</button>
+                  <div style={{fontSize:14,fontWeight:800,color:"#071013"}}>{new Date(jMonth.y,jMonth.m-1,1).toLocaleDateString("en-US",{month:"long",year:"numeric"})}</div>
+                  <button onClick={()=>setJMonth(p=>{const d=new Date(p.y,p.m,1);return{y:d.getFullYear(),m:d.getMonth()+1};})} style={{background:"none",border:"none",fontSize:18,color:"#A2AEBB",cursor:"pointer",padding:"2px 8px"}}>›</button>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>
-                  {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d=>(
-                    <div key={d} style={{fontSize:10,fontWeight:700,color:"#94A3B8",textAlign:"center",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{d}</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:6}}>
+                  {["S","M","T","W","T","F","S"].map((d,i)=>(
+                    <div key={i} style={{fontSize:9,fontWeight:800,color:"#A2AEBB",textAlign:"center",padding:"0 0 4px",textTransform:"uppercase",letterSpacing:"0.06em"}}>{d}</div>
                   ))}
                 </div>
                 <div className="jcal-grid">
                   {getCalDays(jMonth.y,jMonth.m).map((day,i)=>{
-                    if(!day)return<div key={`e${i}`} className="jcal-cell empty"/>;
+                    if(!day)return<div key={"e"+i} className="jcal-cell empty"/>;
                     const ds=`${jMonth.y}-${String(jMonth.m).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
                     const hasEntry=!!(journal[ds]&&journal[ds].trim());
                     const isToday=ds===today; const isViewing=jViewDate===ds; const isFuture=ds>today;
                     return(
-                      <div key={ds} className={`jcal-cell ${hasEntry?"has-entry":""} ${isToday&&!hasEntry?"today-cell":""} ${isFuture?"future":""}`}
-                        style={{background:hasEntry?"linear-gradient(135deg,#1A3A6B,#2563EB)":isToday?"transparent":"rgba(255,255,255,0.3)",color:hasEntry?"#fff":isToday?"#2563EB":"#64748B",border:isToday&&!hasEntry?"2px solid #2563EB":isViewing&&!hasEntry?"2px solid #F59E0B":"none",boxShadow:isViewing?"0 0 0 2px #F59E0B":"none"}}
+                      <div key={ds} className={"jcal-cell"+(hasEntry?" has-entry":"")+(isToday&&!hasEntry?" today-cell":"")+(isFuture?" future":"")}
+                        style={{background:hasEntry?"#23B5D3":isToday?"transparent":"rgba(255,255,255,0.3)",color:hasEntry?"#fff":isToday?"#071013":"#4A7080",border:isToday&&!hasEntry?"2px solid #23B5D3":isViewing&&!hasEntry?"2px solid #75ABBC":"none"}}
                         onClick={()=>{if(!isFuture)setJViewDate(ds===jViewDate?null:ds);}}>
                         {day}
                       </div>
                     );
                   })}
                 </div>
-                <div style={{textAlign:"center",marginTop:12,fontSize:12,color:"#64748B"}}>{Object.keys(journal).filter(k=>journal[k]?.trim()).length} entries this year</div>
               </div>
 
-              {jViewDate&&jViewDate!==today?(
-                <>
-                  <div style={{background:"rgba(255,255,255,0.55)",backdropFilter:"blur(16px)",border:"1px solid rgba(255,255,255,0.65)",borderRadius:18,padding:20,marginBottom:12,boxShadow:"0 2px 16px rgba(11,25,41,0.05)"}}>
-                    <div style={{fontSize:22,fontWeight:800,color:"#0B1929",letterSpacing:"-0.02em",marginBottom:2}}>{new Date(jViewDate+"T12:00:00").toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
-                    <div style={{fontSize:12,fontWeight:600,color:"#64748B",marginBottom:16}}>{new Date(jViewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long"})}</div>
-                    {journal[jViewDate]?.trim()
-                      ?<div style={{fontSize:15,lineHeight:1.75,color:"#334155",whiteSpace:"pre-wrap"}}>{journal[jViewDate]}</div>
-                      :<div style={{fontSize:14,color:"#94A3B8",fontStyle:"italic"}}>No entry for this day.</div>
-                    }
-                  </div>
-                  <button onClick={()=>setJViewDate(null)} style={{width:"100%",padding:14,background:"rgba(255,255,255,0.5)",border:"1px solid rgba(255,255,255,0.6)",borderRadius:14,color:"#64748B",fontSize:15,fontWeight:600,cursor:"pointer",backdropFilter:"blur(12px)"}}>Back to today</button>
-                </>
-              ):(
-                <>
-                  <div className="sec"><div className="sec-title">Today's Reflection</div><div className="sec-sub">{new Date().toLocaleDateString("en-US",{weekday:"long"})}</div></div>
-                  <textarea className="journal-input" rows={8} placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"} value={journalInput} onChange={e=>saveJournalEntry(e.target.value)} style={{marginBottom:14}}/>
-                  {Object.entries(journal).filter(([d,t])=>d!==today&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5).length>0&&(
-                    <>
-                      <div className="sec"><div className="sec-title">Recent</div></div>
-                      {Object.entries(journal).filter(([d,t])=>d!==today&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5).map(([d,t])=>{
-                        const dt=new Date(d+"T12:00:00");
-                        return(
-                          <div key={d} style={{background:"rgba(255,255,255,0.45)",backdropFilter:"blur(16px)",border:"1px solid rgba(255,255,255,0.6)",borderRadius:16,padding:"16px 18px",marginBottom:10,boxShadow:"0 2px 12px rgba(11,25,41,0.05)",cursor:"pointer"}}
-                            onClick={()=>{setJMonth({y:dt.getFullYear(),m:dt.getMonth()+1});setJViewDate(d);}}>
-                            <div style={{fontSize:13,fontWeight:800,color:"#2563EB",marginBottom:4}}>{dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
-                            <div style={{fontSize:13,color:"#64748B",lineHeight:1.55,fontStyle:"italic"}}>{t.length>160?t.slice(0,160)+"…":t}</div>
-                          </div>
-                        );
-                      })}
-                    </>
-                  )}
-                </>
+              {/* PAST ENTRY VIEW */}
+              {jViewDate&&jViewDate!==today&&(
+                <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,padding:18,marginBottom:12,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
+                  <div style={{fontSize:16,fontWeight:800,color:"#071013",marginBottom:2}}>{new Date(jViewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+                  <div style={{fontSize:11,color:"#A2AEBB",marginBottom:14,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>{PROMPT_CATS[new Date(jViewDate+"T12:00:00").getDay()%PROMPT_CATS.length].label}</div>
+                  {journal[jViewDate]?.trim()
+                    ?<div style={{fontSize:14,lineHeight:1.8,color:"#2A4050",whiteSpace:"pre-wrap"}}>{journal[jViewDate]}</div>
+                    :<div style={{fontSize:13,color:"#A2AEBB",fontStyle:"italic"}}>No entry for this day.</div>
+                  }
+                  <button onClick={()=>setJViewDate(null)} style={{marginTop:14,background:"none",border:"none",fontSize:12,fontWeight:700,color:"#23B5D3",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase",padding:0}}>← Back</button>
+                </div>
               )}
 
+              {/* FIVE TENETS */}
               <div className="vision-card" style={{marginTop:8}}>
                 {[["Stewardship","Care for what God entrusted: health, family, finances, talent, platform."],["Service","Act humbly. IJM. Family presence. Platform for others."],["Scale","Build and multiply. Legacy for children. Platform that outlasts the role."],["Sweat","Work hard. God-honoring things face natural resistance."],["Sabbath","Three Sundays per month minimum. Rest in sovereignty."]].map(([n,d])=>(
-                  <div className="tenet-row" key={n}><div className="tenet-s">S</div><div><div style={{fontSize:15,fontWeight:700,color:"#0B1929",marginBottom:2}}>{n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{d}</div></div></div>
+                  <div className="tenet-row" key={n}><div className="tenet-s">S</div><div><div style={{fontSize:14,fontWeight:700,color:"#071013",marginBottom:2}}>{n}</div><div style={{fontSize:12,color:"#4A7080",lineHeight:1.45}}>{d}</div></div></div>
                 ))}
               </div>
             </>
-          )}
-
-          {/* ══ HEALTH ══════════════════════════════════════════════════ */}
-          {tab==="health"&&(
-            <>
-              {/* PROTEIN HERO */}
-              <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
-                <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
-                <div style={{position:"absolute",top:-40,right:-30,width:160,height:160,background:"radial-gradient(circle,rgba(35,181,211,0.1),transparent 70%)"}}/>
-                <div style={{position:"relative",zIndex:1}}>
-                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:12}}>Daily Protein</div>
-                  <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:16}}>
-                    {/* Ring */}
-                    <div style={{position:"relative",width:80,height:80,flexShrink:0}}>
-                      <svg viewBox="0 0 80 80" style={{transform:"rotate(-90deg)"}}>
-                        <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="7"/>
-                        <circle cx="40" cy="40" r="34" fill="none" stroke="#23B5D3" strokeWidth="7"
-                          strokeDasharray={`${Math.min(todayProtein/proteinTarget,1)*213.6} 213.6`}
-                          strokeLinecap="round"/>
-                      </svg>
-                      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                        <div style={{fontSize:18,fontWeight:900,color:"#FFFFFF",lineHeight:1}}>{todayProtein}</div>
-                        <div style={{fontSize:8,fontWeight:700,color:"rgba(255,255,255,0.4)",letterSpacing:"0.08em"}}>/ {proteinTarget}g</div>
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:32,fontWeight:900,color:"#FFFFFF",letterSpacing:"-0.03em",lineHeight:1}}>{Math.round((todayProtein/proteinTarget)*100)}%</div>
-                      <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:4}}>{proteinTarget-todayProtein>0?`${proteinTarget-todayProtein}g to go`:"Target hit ✓"}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#23B5D3",marginTop:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>{proteinLog.length} entries today</div>
-                    </div>
-                  </div>
-                  {/* Progress bar */}
-                  <div style={{height:2,background:"rgba(255,255,255,0.1)",borderRadius:0,overflow:"hidden"}}>
-                    <div style={{height:"100%",background:"linear-gradient(90deg,#23B5D3,#75ABBC)",width:`${Math.min((todayProtein/proteinTarget)*100,100)}%`,transition:"width 0.6s"}}/>
-                  </div>
-                </div>
-              </div>
-
-              {/* QUICK ADD */}
-              <div className="sec"><div className="sec-title">Quick Add</div><div className="sec-sub">Tap to log</div></div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-                {PROTEIN_PRESETS.filter(p=>p.grams>0).map(p=>(
-                  <button key={p.label} onClick={()=>logProtein(p)} style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:12,padding:"12px 8px",cursor:"pointer",transition:"all 0.15s",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",textAlign:"center"}}>
-                    <div style={{fontSize:22,marginBottom:4}}>{p.icon}</div>
-                    <div style={{fontSize:12,fontWeight:700,color:"#071013",lineHeight:1.2,marginBottom:2}}>{p.label}</div>
-                    <div style={{fontSize:12,fontWeight:800,color:"#23B5D3"}}>{p.grams}g</div>
-                  </button>
-                ))}
-                <button onClick={()=>setShowCustom(p=>!p)} style={{background:showCustom?"#EAF7FB":"#FFFFFF",border:`1.5px ${showCustom?"solid #23B5D3":"solid rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"12px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)"}}>
-                  <div style={{fontSize:22,marginBottom:4}}>✏️</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#071013",marginBottom:2}}>Custom</div>
-                  <div style={{fontSize:11,color:"#A2AEBB"}}>any amount</div>
-                </button>
-              </div>
-
-              {/* CUSTOM INPUT */}
-              {showCustom&&(
-                <div style={{background:"#FFFFFF",border:"1.5px solid #23B5D3",borderRadius:12,padding:"14px 16px",marginBottom:12,display:"flex",gap:10,alignItems:"center",boxShadow:"0 0 0 3px rgba(35,181,211,0.1)"}}>
-                  <input
-                    type="number" placeholder="Enter grams…"
-                    value={customGrams} onChange={e=>setCustomGrams(e.target.value)}
-                    onKeyDown={e=>e.key==="Enter"&&logCustomProtein()}
-                    style={{flex:1,border:"none",outline:"none",fontSize:17,fontWeight:700,color:"#071013",background:"transparent"}}
-                    autoFocus
-                  />
-                  <span style={{fontSize:14,fontWeight:700,color:"#A2AEBB"}}>g</span>
-                  <button onClick={logCustomProtein} style={{background:"#23B5D3",border:"none",borderRadius:8,padding:"9px 16px",color:"#FFFFFF",fontSize:13,fontWeight:800,cursor:"pointer"}}>Add</button>
-                  <button onClick={()=>{setShowCustom(false);setCustomGrams("");}} style={{background:"none",border:"none",color:"#A2AEBB",fontSize:18,cursor:"pointer"}}>✕</button>
-                </div>
-              )}
-
-              {/* TODAY'S LOG */}
-              {proteinLog.length>0&&(
-                <>
-                  <div className="sec"><div className="sec-title">Today's Log</div><button onClick={async()=>{setProteinLog([]);await save(`wb-protein-${todayKey()}`,[]);}} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#A2AEBB",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>Clear all</button></div>
-                  <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,overflow:"hidden",marginBottom:16,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
-                    {proteinLog.map((e,i)=>(
-                      <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<proteinLog.length-1?"1px solid rgba(35,181,211,0.07)":"none"}}>
-                        <div style={{width:36,height:36,borderRadius:8,background:"#EAF7FB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
-                          {PROTEIN_PRESETS.find(p=>p.label===e.label)?.icon||"🍽️"}
-                        </div>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:14,fontWeight:600,color:"#071013"}}>{e.label}</div>
-                          <div style={{fontSize:11,color:"#A2AEBB",marginTop:1}}>{new Date(e.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
-                        </div>
-                        <div style={{fontSize:15,fontWeight:800,color:"#23B5D3",marginRight:4}}>{e.grams}g</div>
-                        <button onClick={()=>deleteProteinEntry(e.id)} style={{background:"none",border:"none",color:"#DFE0E2",fontSize:18,cursor:"pointer",padding:"2px 4px",lineHeight:1}}>×</button>
-                      </div>
-                    ))}
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:"rgba(35,181,211,0.04)",borderTop:"1px solid rgba(35,181,211,0.1)"}}>
-                      <div style={{fontSize:12,fontWeight:800,color:"#4A7080",letterSpacing:"0.08em",textTransform:"uppercase"}}>Total Today</div>
-                      <div style={{fontSize:18,fontWeight:900,color:"#23B5D3"}}>{todayProtein}g <span style={{fontSize:12,color:"#A2AEBB",fontWeight:600}}>/ {proteinTarget}g</span></div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* WORKOUT SECTION */}
-              <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
-                <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
-                <div style={{position:"relative",zIndex:1}}>
-                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>This Week</div>
-                  <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}>
-                    <div style={{fontSize:48,fontWeight:900,color:"#FFFFFF",lineHeight:1,letterSpacing:"-0.04em"}}>{Object.keys(workoutLog).length}</div>
-                    <div style={{fontSize:14,color:"rgba(255,255,255,0.4)"}}>of 3 workouts</div>
-                  </div>
-                  <div style={{height:2,background:"rgba(255,255,255,0.1)",marginBottom:16,overflow:"hidden"}}>
-                    <div style={{height:"100%",background:"linear-gradient(90deg,#23B5D3,#75ABBC)",width:`${Math.min((Object.keys(workoutLog).length/3)*100,100)}%`,transition:"width 0.6s"}}/>
-                  </div>
-                  {/* Weekly grid */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
-                    {["M","T","W","T","F","S","S"].map((d,i)=>{
-                      const date = new Date();
-                      const dayOfWeek = date.getDay();
-                      const mondayOffset = (dayOfWeek===0?-6:1-dayOfWeek);
-                      const dayDate = new Date(date);
-                      dayDate.setDate(date.getDate()+mondayOffset+i);
-                      const dk = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,"0")}-${String(dayDate.getDate()).padStart(2,"0")}`;
-                      const done = workoutLog[dk];
-                      const isToday = dk===todayKey();
-                      return(
-                        <div key={i} style={{textAlign:"center"}}>
-                          <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.3)",letterSpacing:"0.1em",marginBottom:4}}>{d}</div>
-                          <div
-                            onClick={()=>{if(done)removeWorkout(dk);else logWorkout(dk,"Lift");}}
-                            style={{
-                              width:"100%",aspectRatio:"1",borderRadius:6,
-                              background:done?"#23B5D3":isToday?"rgba(35,181,211,0.15)":"rgba(255,255,255,0.06)",
-                              border:`1px solid ${done?"#23B5D3":isToday?"rgba(35,181,211,0.4)":"rgba(255,255,255,0.1)"}`,
-                              display:"flex",alignItems:"center",justifyContent:"center",
-                              cursor:"pointer",transition:"all 0.15s",fontSize:10,
-                            }}>
-                            {done?<span style={{fontSize:11,fontWeight:800,color:"#FFFFFF"}}>{done.type.slice(0,1)}</span>:isToday?<span style={{fontSize:9,color:"rgba(35,181,211,0.7)"}}>+</span>:null}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* LOG WORKOUT FOR TODAY */}
-              <div className="sec"><div className="sec-title">Log Workout</div><div className="sec-sub">Tap to record today</div></div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
-                {WORKOUT_TYPES.map(type=>{
-                  const icons={"Lift":"🏋️","Run":"🏃","Walk":"🚶","Sport":"⚽","HIIT":"⚡","Other":"💪"};
-                  const todayDone = workoutLog[todayKey()];
-                  const isLogged = todayDone?.type===type;
-                  return(
-                    <button key={type} onClick={()=>isLogged?removeWorkout(todayKey()):logWorkout(todayKey(),type)}
-                      style={{background:isLogged?"#EAF7FB":"#FFFFFF",border:`1.5px solid ${isLogged?"#23B5D3":"rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"14px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",transition:"all 0.15s"}}>
-                      <div style={{fontSize:24,marginBottom:4}}>{icons[type]}</div>
-                      <div style={{fontSize:12,fontWeight:700,color:isLogged?"#0D6B85":"#071013"}}>{type}</div>
-                      {isLogged&&<div style={{fontSize:9,fontWeight:800,color:"#23B5D3",marginTop:2,letterSpacing:"0.08em"}}>DONE ✓</div>}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* MINIMUM PROTOCOL */}
-              <div className="sec"><div className="sec-title">The Protocol</div><div className="sec-sub">When time is short</div></div>
-              <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,padding:18,marginBottom:12,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
-                <div style={{fontSize:13,fontWeight:800,color:"#23B5D3",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>12-Minute Minimum</div>
-                <div style={{fontSize:12,color:"#4A7080",lineHeight:1.7,marginBottom:12}}>When the day closes in, this is non-negotiable. 12 minutes. No equipment. Gets it done.</div>
-                {[["0:00–3:00","5 push-ups, 5 squats, 5 hip hinges × 3 sets. No rest. Get the blood moving."],["3:00–7:00","10 push-ups, 10 lunges (each leg), 10 pike push-ups. One set each."],["7:00–10:00","Max push-ups, max bodyweight squats, 30-sec plank. One round."],["10:00–12:00","Dead hang or doorframe pull-up hold. Finish with 10 slow deep breaths."]].map(([t,d])=>(
-                  <div key={t} style={{display:"flex",gap:12,paddingBottom:10,marginBottom:10,borderBottom:"1px solid rgba(35,181,211,0.07)"}}>
-                    <div style={{fontSize:10,fontWeight:800,color:"#23B5D3",letterSpacing:"0.06em",width:56,flexShrink:0,paddingTop:2}}>{t}</div>
-                    <div style={{fontSize:13,color:"#071013",lineHeight:1.6}}>{d}</div>
-                  </div>
-                ))}
-                <div style={{fontSize:11,fontWeight:700,color:"#7A9AAA",fontStyle:"italic",marginTop:4}}>Done is better than perfect. Log it. Streak protected.</div>
-              </div>
-
-              {/* WEEKLY CONSISTENCY TIP */}
-              <div style={{background:"#EAF7FB",border:"1px solid rgba(35,181,211,0.2)",borderRadius:14,padding:16,marginBottom:12}}>
-                <div style={{fontSize:12,fontWeight:800,color:"#0D6B85",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>The Real Fix</div>
-                <div style={{fontSize:13,color:"#2A4050",lineHeight:1.7}}>The workout isn't the problem — the schedule is. Block 6:00–6:30am in your calendar as immovable. Before the day exists. Before email. Before anyone needs anything from you. Everything else is a negotiation. This block isn't.</div>
-              </div>
-            </>
-          )}
-        </div>
+          )}        </div>
 
         {/* BOTTOM NAV — SVG line icons */}
         <div className="bottom-nav">
