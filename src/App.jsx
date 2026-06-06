@@ -904,15 +904,15 @@ export default function App() {
     return ()=>clearTimeout(t);
   },[]);
 
-  // ── LOAD ─────────────────────────────────────────────────────────────
-  useEffect(()=>{
-    // Debounce map for saves
+  // ── DEBOUNCED SAVE ────────────────────────────────────────────────────
   const saveTimers = useRef({});
   const debouncedSave = useCallback((key, value, delay=600) => {
     if(saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
     saveTimers.current[key] = setTimeout(()=>{ save(key, value); }, delay);
   }, []);
 
+  // ── LOAD ─────────────────────────────────────────────────────────────
+  useEffect(()=>{
   async function loadAll() {
       const today = todayKey();
       const mode  = getModeForDate(today);
