@@ -18,7 +18,6 @@ const getModeForDate = (ds) => { const d=new Date(ds+"T12:00:00"); if(d.getDay()
 const getDayKey = (ds, mode) => `cl-${mode}-${ds}`;
 const formatDate = () => new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
 const formatShort = (iso) => new Date(iso.split("T")[0]+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
-const summerDaysLeft = () => { const n=new Date(),s=new Date(n.getFullYear(),5,21); if(n>s)s.setFullYear(s.getFullYear()+1); return Math.ceil((s-n)/864e5); };
 const getPastDays = (n) => { const days=[]; for(let i=n-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);days.push(localDate(d));} return days; };
 const getLevelInfo = (xp) => {
   const T=[{l:1,max:499,t:"Getting Started"},{l:2,max:999,t:"Building Rhythm"},{l:3,max:1999,t:"Gaining Momentum"},{l:4,max:3499,t:"In the Flow"},{l:5,max:5999,t:"Man After God\'s Heart"},{l:6,max:Infinity,t:"Legacy Builder"}];
@@ -180,8 +179,7 @@ const ACHIEVEMENTS = [
   {id:"a9",icon:"🌍",title:"Legacy Builder",check:s=>s.totalXP>=2500},
 ];
 
-const STAGE_PCT = {"Not Started":0,"Written":20,"Demo":40,"Recording":60,"Mixing":80,"Complete":100};
-const APP_VERSION = "1.01";
+const APP_VERSION = "1.02";
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {
@@ -726,23 +724,8 @@ export default function App() {
   const [platState,   setPlatState]   = useState({});
   const [customLists, setCustomLists] = useState(null);
 
-  // Goals / music / journal / planner
+  // Goals / journal / planner
   const [goals,       setGoals]       = useState(DEFAULT_GOALS);
-  const [tracks,      setTracks]      = useState([
-    {id:"t0",title:"Track 01",stage:"Recording",priority:true,notes:""},
-    {id:"t1",title:"Track 02",stage:"Demo",priority:false,notes:""},
-    {id:"t2",title:"Track 03",stage:"Written",priority:false,notes:""},
-    {id:"t3",title:"Track 04",stage:"Demo",priority:false,notes:""},
-    {id:"t4",title:"Track 05",stage:"Written",priority:false,notes:""},
-    {id:"t5",title:"Track 06",stage:"Written",priority:false,notes:""},
-    {id:"t6",title:"Track 07",stage:"Not Started",priority:false,notes:""},
-    {id:"t7",title:"Track 08",stage:"Not Started",priority:false,notes:""},
-    {id:"t8",title:"Track 09",stage:"Not Started",priority:false,notes:""},
-    {id:"t9",title:"Track 10",stage:"Not Started",priority:false,notes:""},
-  ]);
-  const [practiceLogs,setPracticeLogs]= useState({});
-  const [activeInstr, setActiveInstr] = useState("Bass");
-  const [churchRoster,setChurchRoster]= useState(false);
   const [journal,     setJournal]     = useState({});
   const [journalInput,setJournalInput]= useState("");
   const [jViewDate,   setJViewDate]   = useState(null);
@@ -772,6 +755,9 @@ export default function App() {
   const [lessonThisWeek, setLessonThisWeek] = useState(false);
   const [milestoneAck, setMilestoneAck] = useState({main:0,health:0}); // highest milestone day already shown
   const [milestoneQueue, setMilestoneQueue] = useState([]); // pending splash celebrations
+  const [progressSubTab, setProgressSubTab] = useState("stats"); // stats | rhythms | platform | health
+  const [addingSubFor, setAddingSubFor] = useState(null); // todo id currently adding a sub-item
+  const [subInput, setSubInput] = useState("");
   const [avatar,      setAvatar]      = useState(null);   // base64 data URL
   // Health
   const [proteinLog,  setProteinLog]  = useState([]);   // [{id,label,grams,at}] — today only
@@ -802,21 +788,20 @@ export default function App() {
         const results = await Promise.all([
           load(dkey), load(`cl-weekly-${weekKey()}`), load(`cl-monthly-${monthKey()}`),
           load(`cl-annual-${yearKey()}`), load(`cl-ijm-${weekKey()}`), load(`cl-platform-${monthKey()}`),
-          load("wb-goals-v5"), load("wb-tracks-v3"), load(`wb-prac-${weekKey()}`),
-          load(`wb-church-${weekKey()}`), load("wb-friends-v2"), load("wb-fin-v2"),
+          load("wb-goals-v5"),
+          load("wb-friends-v2"), load("wb-fin-v2"),
           load("wb-totalxp"), load("wb-streaks-v4"), load("wb-ach-v3"),
           load("wb-trips-v1"), load("wb-travel-mode"), load("wb-travel-dest"),
           load(`wb-journal-${yearKey()}`), load(`wb-weekplan-${weekKey()}`),
           load("wb-planarchive"), load("wb-todos-v1"), load("wb-custom-lists"),
           load(`wb-history-${yearKey()}`),
         ]);
-        const [ds,ws,ms,as,ij,plt,g,tr,pl,cr,fl,fin,xp,s,ach,tl,tm,dest,jrnl,wp,pa,tod,cl,hist] = results;
+        const [ds,ws,ms,as,ij,plt,g,fl,fin,xp,s,ach,tl,tm,dest,jrnl,wp,pa,tod,cl,hist] = results;
         if(ds)  setDayStates(p=>({...p,[dkey]:ds}));
         if(ws)  setWeeklyState(ws); if(ms)  setMonthlyState(ms);
         if(as)  setAnnualState(as); if(ij)  setIjmState(ij);
         if(plt) setPlatState(plt);  if(g)   setGoals(g);
-        if(tr)  setTracks(tr);      if(pl)  setPracticeLogs(pl);
-        if(cr!==null) setChurchRoster(cr); if(fl) setFriendLog(fl);
+        if(fl) setFriendLog(fl);
         if(fin) setFinancials(fin); if(xp)  setTotalXP(xp);
         if(s)   setStreaks(s);      if(ach) setUnlockedAch(ach);
         if(tl)  setTripLog(tl);    if(tm)  setTravelMode(tm);
@@ -883,8 +868,6 @@ export default function App() {
   const weeklyPts  = weeklyItems.reduce((s,i)=>s+(weeklyState[i.id]?.checked?i.xp:0),0);
   const weeklyPct  = weeklyMax>0?Math.round(weeklyPts/weeklyMax*100):0;
   const platItems  = lists.platform||DEFAULT_LISTS.platform;
-  const completedTracks = tracks.filter(t=>t.stage==="Complete").length;
-  const albumProgress   = Math.round(tracks.reduce((s,t)=>s+(STAGE_PCT[t.stage]||0),0)/tracks.length);
   const goalsComplete   = goals.filter(g=>g.completed).length;
   const debtPct  = financials.debtStart>0?Math.round(((financials.debtStart-financials.debtCurrent)/financials.debtStart)*100):0;
   const savPct   = financials.savingsTarget>0?Math.min(100,Math.round((financials.savingsCurrent/financials.savingsTarget)*100)):0;
@@ -894,7 +877,6 @@ export default function App() {
   const stats = {totalXP,streak:streaks.current,totalDays:streaks.totalDays||0,sabbaths:streaks.sabbaths||0,goalsComplete,practiceSessions:streaks.practiceSessions||0,friendDinners:streaks.friendDinners||0,tripCount:streaks.tripCount||0};
   const levelInfo = getLevelInfo(totalXP);
   const scripture = getDailyScripture();
-  const wkSessions = Object.keys(practiceLogs).length;
   const filteredGoals = domainFilter==="all"?goals:goals.filter(g=>g.domain===domainFilter);
   const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
   const pastDays = getPastDays(30).reverse();
@@ -1084,16 +1066,6 @@ export default function App() {
   const updEditorItem=(lk,idx,field,val)=>setEditLists(p=>{const l=[...(p[lk]||[])];l[idx]={...l[idx],[field]:field==="xp"?parseInt(val)||0:val};return{...p,[lk]:l};});
   const delEditorItem=(lk,idx)=>setEditLists(p=>({...p,[lk]:p[lk].filter((_,i)=>i!==idx)}));
 
-  // ── MUSIC ────────────────────────────────────────────────────────────
-  const logPractice=async()=>{
-    const key=`s-${Date.now()}`;const nl={...practiceLogs,[key]:{instrument:activeInstr,at:new Date().toISOString()}};
-    setPracticeLogs(nl);await save(`wb-prac-${weekKey()}`,nl);
-    const nst={...streaks,practiceSessions:(streaks.practiceSessions||0)+1};setStreaks(nst);await save("wb-streaks-v4",nst);
-    const nxp=totalXP+10;setTotalXP(nxp);await save("wb-totalxp",nxp);
-    setXpFloat(10);setTimeout(()=>setXpFloat(null),1300);showToast(`🎸 ${activeInstr} logged +10 pts`);
-  };
-  const updateTrack=async(idx,changes)=>{const u=tracks.map((t,i)=>i===idx?{...t,...changes}:t);setTracks(u);await save("wb-tracks-v3",u);};
-
   // ── JOURNAL ──────────────────────────────────────────────────────────
   const saveJournalEntry=async(text)=>{
     setJournalInput(text);
@@ -1191,9 +1163,23 @@ export default function App() {
     const nc = categories.map(c=>c.id===id?{...c,name}:c);
     await saveCats(nc); setEditCatId(null);
   };
-  const addTodo=async()=>{if(!todoInput.trim())return;const u=[...todos,{id:`t-${Date.now()}`,text:todoInput.trim(),done:false,categoryId:activeCatId}];setTodos(u);await save("wb-todos-v1",u);setTodoInput("");};
+  const addTodo=async()=>{if(!todoInput.trim())return;const u=[...todos,{id:`t-${Date.now()}`,text:todoInput.trim(),done:false,categoryId:activeCatId,subitems:[]}];setTodos(u);await save("wb-todos-v1",u);setTodoInput("");};
   const toggleTodo=async(id)=>{const u=todos.map(t=>t.id===id?{...t,done:!t.done}:t);setTodos(u);await save("wb-todos-v1",u);};
   const deleteTodo=async(id)=>{const u=todos.filter(t=>t.id!==id);setTodos(u);await save("wb-todos-v1",u);};
+  // ── SUB-ITEMS ──────────────────────────────────────────────────────
+  const addSubTodo=async(todoId)=>{
+    if(!subInput.trim())return;
+    const u=todos.map(t=>t.id===todoId?{...t,subitems:[...(t.subitems||[]),{id:`st-${Date.now()}`,text:subInput.trim(),done:false}]}:t);
+    setTodos(u);await save("wb-todos-v1",u);setSubInput("");setAddingSubFor(null);
+  };
+  const toggleSubTodo=async(todoId,subId)=>{
+    const u=todos.map(t=>t.id===todoId?{...t,subitems:(t.subitems||[]).map(s=>s.id===subId?{...s,done:!s.done}:s)}:t);
+    setTodos(u);await save("wb-todos-v1",u);
+  };
+  const deleteSubTodo=async(todoId,subId)=>{
+    const u=todos.map(t=>t.id===todoId?{...t,subitems:(t.subitems||[]).filter(s=>s.id!==subId)}:t);
+    setTodos(u);await save("wb-todos-v1",u);
+  };
 
   // ── HERO HELPERS ─────────────────────────────────────────────────────
   const heroClass = () => {
@@ -1584,12 +1570,46 @@ export default function App() {
                               </div>
                             )}
                             {catTodos.map(todo=>(
-                              <div key={todo.id} className="c-row">
-                                <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
-                                <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
-                                  <div className="c-main" style={{color:todo.done?"#A2AEBB":"#071013",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
+                              <div key={todo.id} style={{borderBottom:"1px solid rgba(11,25,41,0.04)"}}>
+                                <div className="c-row" style={{borderBottom:"none"}}>
+                                  <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
+                                  <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
+                                    <div className="c-main" style={{color:todo.done?"#A2AEBB":"#071013",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
+                                  </div>
+                                  <button
+                                    onClick={()=>setAddingSubFor(addingSubFor===todo.id?null:todo.id)}
+                                    title="Add sub-item"
+                                    style={{background:"none",border:"none",color:"#94A3B8",fontSize:16,fontWeight:700,cursor:"pointer",padding:"0 6px"}}
+                                  >+</button>
+                                  <button className="todo-del" onClick={()=>deleteTodo(todo.id)}>×</button>
                                 </div>
-                                <button className="todo-del" onClick={()=>deleteTodo(todo.id)}>×</button>
+
+                                {(todo.subitems||[]).length>0&&(
+                                  <div style={{paddingLeft:34,paddingBottom:6}}>
+                                    {todo.subitems.map(sub=>(
+                                      <div key={sub.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px 6px 0"}}>
+                                        <div className={`todo-circle ${sub.done?"done":""}`} style={{width:16,height:16,flexShrink:0}} onClick={()=>toggleSubTodo(todo.id,sub.id)}/>
+                                        <div onClick={()=>toggleSubTodo(todo.id,sub.id)} style={{flex:1,cursor:"pointer",fontSize:12.5,color:sub.done?"#A2AEBB":"#4A5A62",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</div>
+                                        <button className="todo-del" style={{fontSize:14}} onClick={()=>deleteSubTodo(todo.id,sub.id)}>×</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {addingSubFor===todo.id&&(
+                                  <div style={{display:"flex",gap:6,padding:"0 12px 10px 34px"}}>
+                                    <input
+                                      autoFocus
+                                      className="field"
+                                      style={{fontSize:12.5,padding:"7px 10px"}}
+                                      placeholder="Sub-item…"
+                                      value={subInput}
+                                      onChange={e=>setSubInput(e.target.value)}
+                                      onKeyDown={e=>{if(e.key==="Enter")addSubTodo(todo.id);if(e.key==="Escape"){setAddingSubFor(null);setSubInput("");}}}
+                                    />
+                                    <button className="todo-add-btn" onClick={()=>addSubTodo(todo.id)}>+</button>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -1607,7 +1627,16 @@ export default function App() {
           )}
 
           {/* ══ RHYTHMS ════════════════════════════════════════════════ */}
-          {tab==="rhythms"&&(
+          {/* ══ PROGRESS SUB-NAV (Stats / Rhythms / Platform / Health) ═══ */}
+          {tab==="progress"&&(
+            <div className="r-tabs" style={{marginTop:8}}>
+              {[["stats","Stats"],["rhythms","Rhythms"],["platform","Platform"],["health","Health"]].map(([k,l])=>(
+                <button key={k} className={`r-tab ${progressSubTab===k?"active":""}`} onClick={()=>setProgressSubTab(k)}>{l}</button>
+              ))}
+            </div>
+          )}
+
+          {tab==="progress"&&progressSubTab==="rhythms"&&(
             <>
               <div className="r-tabs" style={{marginTop:8}}>
                 {[["weekly","Weekly"],["monthly","Monthly"],["annual","Annual"]].map(([k,l])=>(
@@ -1660,7 +1689,7 @@ export default function App() {
           )}
 
           {/* ══ PLATFORM ═══════════════════════════════════════════════ */}
-          {tab==="platform"&&(
+          {tab==="progress"&&progressSubTab==="platform"&&(
             <>
               <div className="platform-hero" style={{marginTop:4}}>
                 <div style={{position:"relative",zIndex:1}}>
@@ -1697,7 +1726,7 @@ export default function App() {
           )}
 
           {/* ══ PROGRESS ═══════════════════════════════════════════════ */}
-          {tab==="progress"&&(
+          {tab==="progress"&&progressSubTab==="stats"&&(
             <>
               <div className="sec" style={{marginTop:8}}><div className="sec-title">By Domain</div></div>
               <div className="d-grid">
@@ -1778,7 +1807,7 @@ export default function App() {
               )}
               <div className="sec"><div className="sec-title">Stats</div></div>
               <div className="stat-card">
-                {[["Streak",`${streaks.current} days`],["Best Streak",`${streaks.longest} days`],["Days Complete",`${streaks.totalDays||0}`],["Sabbaths Honored",`${streaks.sabbaths||0}`],["Practice Sessions",`${streaks.practiceSessions||0}`],["Album Progress",`${albumProgress}%`],["Trips",`${tripLog.length}`],["Goals Done",`${goalsComplete}/${goals.length}`],["Total Points",`${totalXP}`]].map(([l,v])=>(
+                {[["Streak",`${streaks.current} days`],["Best Streak",`${streaks.longest} days`],["Days Complete",`${streaks.totalDays||0}`],["Sabbaths Honored",`${streaks.sabbaths||0}`],["Practice Sessions",`${streaks.practiceSessions||0}`],["Trips",`${tripLog.length}`],["Goals Done",`${goalsComplete}/${goals.length}`],["Total Points",`${totalXP}`]].map(([l,v])=>(
                   <div key={l} className="s-row"><div className="s-lbl">{l}</div><div className="s-val">{v}</div></div>
                 ))}
               </div>
@@ -1851,84 +1880,6 @@ export default function App() {
                         )}
                       </>
                     )}
-                  </div>
-                );
-              })}
-            </>
-          )}
-
-          {/* ══ MUSIC ══════════════════════════════════════════════════ */}
-          {tab==="music"&&(
-            <>
-              <div className="music-hero" style={{marginTop:4}}>
-                <div style={{position:"relative",zIndex:1}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:3}}>The Album</div>
-                  <div style={{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:2}}>Untitled Record</div>
-                  <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:18}}>10 songs · 12 months</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                    {[{v:completedTracks,l:"Done",a:"of 10"},{v:wkSessions,l:"Sessions",a:"this week"},{v:summerDaysLeft(),l:"Days",a:"to summer"}].map(({v,l,a})=>(
-                      <div key={l} style={{background:"rgba(255,255,255,0.1)",borderRadius:13,padding:"11px 9px",backdropFilter:"blur(8px)"}}>
-                        <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:"-0.03em"}}>{v}</div>
-                        <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:1}}>{l}</div>
-                        <div style={{fontSize:11,fontWeight:700,color:"#60A5FA",marginTop:1}}>{a}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="album-card">
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-                  <div><div style={{fontSize:17,fontWeight:800,color:"#0B1929"}}>Album Progress</div><div style={{fontSize:12,color:"#64748B",marginTop:2}}>Track 01 target: this summer</div></div>
-                  <div style={{background:"linear-gradient(135deg,#E0F7FA,#B2EBF2)",borderRadius:12,padding:"8px 13px",textAlign:"center"}}>
-                    <div style={{fontSize:20,fontWeight:900,color:"#071013",letterSpacing:"-0.03em"}}>{summerDaysLeft()}</div>
-                    <div style={{fontSize:9,fontWeight:700,color:"#071013",textTransform:"uppercase",letterSpacing:"0.08em"}}>days left</div>
-                  </div>
-                </div>
-                <div className="album-bar"><div className="album-fill" style={{width:`${albumProgress}%`}}/></div>
-                <div style={{display:"flex",justifyContent:"space-between"}}><div style={{fontSize:13,color:"#64748B"}}>Overall</div><div style={{fontSize:14,fontWeight:800,color:"#0B1929"}}>{albumProgress}%</div></div>
-              </div>
-              <div className="sec"><div className="sec-title">Practice</div><div className="sec-sub">Target: 3 sessions per week</div></div>
-              <div className="prac-grid">
-                {[0,1,2].map(i=>{
-                  const skeys=Object.keys(practiceLogs);const logged=i<skeys.length;const instr=logged?practiceLogs[skeys[i]]?.instrument:"";
-                  return(
-                    <div key={i} className={`prac-card ${logged?"logged":""}`} onClick={!logged?logPractice:undefined}>
-                      <div style={{fontSize:30,fontWeight:900,color:logged?"#1D4ED8":"#CBD5E1",letterSpacing:"-0.04em",marginBottom:3}}>{i+1}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:logged?"#3B82F6":"#CBD5E1",textTransform:"uppercase",letterSpacing:"0.06em"}}>{logged?"Done":"Tap"}</div>
-                      <div style={{fontSize:11,color:logged?"#1D4ED8":"#94A3B8",marginTop:3,fontWeight:logged?600:400}}>{logged?instr:"to log"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="check-card" style={{marginBottom:13}}>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",padding:"14px 17px 10px"}}>
-                  {["Bass","Guitar","Piano","Drums"].map(ins=>(
-                    <button key={ins} onClick={()=>setActiveInstr(ins)} style={{padding:"9px 16px",borderRadius:100,border:"none",background:activeInstr===ins?"linear-gradient(135deg,#1A3A6B,#2563EB)":"rgba(255,255,255,0.5)",color:activeInstr===ins?"#fff":"#64748B",fontSize:13,fontWeight:600,cursor:"pointer",transition:"all 0.2s"}}>{ins}</button>
-                  ))}
-                </div>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 17px",borderTop:"1px solid rgba(11,25,41,0.04)"}}>
-                  <div><div style={{fontSize:15,fontWeight:600,color:"#0B1929"}}>Church roster this week</div><div style={{fontSize:12,color:"#64748B",marginTop:1}}>{churchRoster?"Covered ✓":"Requires discipline"}</div></div>
-                  <button style={{width:50,height:30,borderRadius:100,background:churchRoster?"linear-gradient(90deg,#1A3A6B,#2563EB)":"#CBD5E1",border:"none",cursor:"pointer",position:"relative",transition:"background 0.25s",flexShrink:0}} onClick={async()=>{const nc=!churchRoster;setChurchRoster(nc);await save(`wb-church-${weekKey()}`,nc);}}>
-                    <div style={{position:"absolute",top:3,left:churchRoster?23:3,width:24,height:24,borderRadius:"50%",background:"#fff",transition:"left 0.25s",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}/>
-                  </button>
-                </div>
-              </div>
-              <div className="sec"><div className="sec-title">Tracks</div><div className="sec-sub">Tap title to rename</div></div>
-              {tracks.map((t,i)=>{
-                const pct=STAGE_PCT[t.stage]||0;
-                return(
-                  <div key={t.id} className={`track-card ${t.priority?"priority":""}`}>
-                    <div className="track-hdr">
-                      <div style={{fontSize:12,fontWeight:700,color:"#CBD5E1",width:24}}>{String(i+1).padStart(2,"0")}</div>
-                      <div className="track-title" onClick={()=>updateTrack(i,{_editing:!t._editing})}>{t._editing?null:t.title}</div>
-                      {t._editing&&<input style={{flex:1,border:"none",borderBottom:"2px solid #2563EB",background:"transparent",fontSize:15,fontWeight:700,color:"#0B1929",outline:"none",paddingBottom:2}} value={t.title} autoFocus onChange={e=>updateTrack(i,{title:e.target.value})} onBlur={()=>updateTrack(i,{_editing:false})} onKeyDown={e=>e.key==="Enter"&&updateTrack(i,{_editing:false})}/>}
-                      {t.priority&&<span style={{fontSize:13}}>⭐</span>}
-                      <select className={`stage-sel ${t.stage==="Complete"?"complete":""}`} value={t.stage} onChange={e=>updateTrack(i,{stage:e.target.value})}>
-                        {["Not Started","Written","Demo","Recording","Mixing","Complete"].map(s=><option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div className="track-bar"><div className="track-fill" style={{width:`${pct}%`}}/></div>
-                    <textarea className="track-note" rows={1} placeholder="Notes…" value={t.notes||""} onChange={e=>updateTrack(i,{notes:e.target.value})}/>
                   </div>
                 );
               })}
@@ -2087,7 +2038,7 @@ export default function App() {
           )}
 
           {/* ══ HEALTH ══════════════════════════════════════════════════ */}
-          {tab==="health"&&(
+          {tab==="progress"&&progressSubTab==="health"&&(
             <>
               {/* PROTEIN HERO */}
               <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
@@ -2275,13 +2226,9 @@ export default function App() {
         <div className="bottom-nav">
           {[
             {id:"today",lbl:"Today",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 15l2.5 2.5L16 13"/></svg>},
-            {id:"rhythms",lbl:"Rhythms",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>},
-            {id:"platform",lbl:"Platform",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>},
             {id:"progress",lbl:"Progress",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>},
             {id:"planner",lbl:"Plan",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 7h8M8 12h8M8 17h5"/></svg>},
-            {id:"music",lbl:"Music",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><circle cx="8" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M11 18V7l10-2v9"/></svg>},
             {id:"journal",lbl:"Journal",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>},
-            {id:"health",lbl:"Health",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>},
           ].map(n=>(
             <button key={n.id} className={"nav-btn"+(tab===n.id?" active":"")} onClick={()=>setTab(n.id)}>
               <div className="nav-icon">{n.path}</div>
