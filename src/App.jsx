@@ -179,7 +179,7 @@ const ACHIEVEMENTS = [
   {id:"a9",icon:"🌍",title:"Legacy Builder",check:s=>s.totalXP>=2500},
 ];
 
-const APP_VERSION = "1.02";
+const APP_VERSION = "1.03";
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {
@@ -704,6 +704,9 @@ export default function App() {
   const [showTM,      setShowTM]      = useState(false);
   const [tempDest,    setTempDest]    = useState("");
   const [tripLog,     setTripLog]     = useState([]);
+  const [editingTripId, setEditingTripId] = useState(null);
+  const [tripDraft,   setTripDraft]   = useState({dest:"",start:"",type:"IJM"});
+  const [showAddTrip, setShowAddTrip] = useState(false);
 
   // History / date view
   const [viewDate,    setViewDate]    = useState(null);
@@ -1023,6 +1026,26 @@ export default function App() {
     const nst={...streaks,tripCount:(streaks.tripCount||0)+1};setStreaks(nst);await save("wb-streaks-v4",nst);
     const tkey=getDayKey(today,"travel");if(!dayStates[tkey]){const d=await load(tkey)||{};setDayStates(p=>({...p,[tkey]:d}));}
     setTempDest("");showToast(`✈️ Travel mode — ${tempDest.trim()}`);
+  };
+  const startEditTrip=(t)=>{setEditingTripId(t.id);setTripDraft({dest:t.dest,start:t.start?t.start.slice(0,10):"",type:t.type||"IJM"});setShowAddTrip(false);};
+  const cancelEditTrip=()=>{setEditingTripId(null);setTripDraft({dest:"",start:"",type:"IJM"});};
+  const saveEditTrip=async()=>{
+    if(!tripDraft.dest.trim())return;
+    const u=tripLog.map(t=>t.id===editingTripId?{...t,dest:tripDraft.dest.trim(),start:tripDraft.start?new Date(tripDraft.start+"T12:00:00").toISOString():t.start,type:tripDraft.type||"IJM"}:t);
+    setTripLog(u);await save("wb-trips-v1",u);
+    setEditingTripId(null);setTripDraft({dest:"",start:"",type:"IJM"});
+  };
+  const deleteTrip=async(id)=>{
+    const u=tripLog.filter(t=>t.id!==id);setTripLog(u);await save("wb-trips-v1",u);
+    const nst={...streaks,tripCount:Math.max(0,(streaks.tripCount||0)-1)};setStreaks(nst);await save("wb-streaks-v4",nst);
+    if(editingTripId===id)cancelEditTrip();
+  };
+  const addManualTrip=async()=>{
+    if(!tripDraft.dest.trim())return;
+    const trip={id:`trip-${Date.now()}`,dest:tripDraft.dest.trim(),start:tripDraft.start?new Date(tripDraft.start+"T12:00:00").toISOString():new Date().toISOString(),type:tripDraft.type||"IJM"};
+    const nl=[trip,...tripLog];setTripLog(nl);await save("wb-trips-v1",nl);
+    const nst={...streaks,tripCount:(streaks.tripCount||0)+1};setStreaks(nst);await save("wb-streaks-v4",nst);
+    setTripDraft({dest:"",start:"",type:"IJM"});setShowAddTrip(false);
   };
   const disableTravel=async()=>{setTravelMode(false);setTravelDest("");await save("wb-travel-mode",false);await save("wb-travel-dest","");showToast("🏠 Home mode restored");};
 
@@ -1791,19 +1814,51 @@ export default function App() {
                   ))}
                 </div>
               )}
+              <div className="sec">
+                <div className="sec-title">Trip Log</div>
+                <div className="sec-sub">{tripLog.length} trips</div>
+                <button
+                  onClick={()=>{setShowAddTrip(v=>!v);setEditingTripId(null);setTripDraft({dest:"",start:"",type:"IJM"});}}
+                  style={{marginLeft:"auto",background:"none",border:"none",color:"#23B5D3",fontSize:13,fontWeight:800,cursor:"pointer"}}
+                >{showAddTrip?"Cancel":"+ Add trip"}</button>
+              </div>
+
+              {showAddTrip&&(
+                <div className="add-form" style={{marginBottom:12}}>
+                  <input className="field" placeholder="Destination…" value={tripDraft.dest} onChange={e=>setTripDraft(p=>({...p,dest:e.target.value}))}/>
+                  <input className="field" type="date" value={tripDraft.start} onChange={e=>setTripDraft(p=>({...p,start:e.target.value}))}/>
+                  <select className="field" value={tripDraft.type} onChange={e=>setTripDraft(p=>({...p,type:e.target.value}))}>
+                    {["IJM","Personal","Family"].map(t=><option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <div className="btn-row"><button className="btn-s" onClick={()=>setShowAddTrip(false)}>Cancel</button><button className="btn-p" onClick={addManualTrip}>Save trip</button></div>
+                </div>
+              )}
+
               {tripLog.length>0&&(
-                <>
-                  <div className="sec"><div className="sec-title">Trip Log</div><div className="sec-sub">{tripLog.length} trips</div></div>
-                  <div className="trip-card">
-                    {tripLog.map(t=>(
+                <div className="trip-card">
+                  {tripLog.map(t=>(
+                    editingTripId===t.id?(
+                      <div key={t.id} className="add-form" style={{margin:8,borderRadius:12}}>
+                        <input className="field" placeholder="Destination…" value={tripDraft.dest} onChange={e=>setTripDraft(p=>({...p,dest:e.target.value}))}/>
+                        <input className="field" type="date" value={tripDraft.start} onChange={e=>setTripDraft(p=>({...p,start:e.target.value}))}/>
+                        <select className="field" value={tripDraft.type} onChange={e=>setTripDraft(p=>({...p,type:e.target.value}))}>
+                          {["IJM","Personal","Family"].map(ty=><option key={ty} value={ty}>{ty}</option>)}
+                        </select>
+                        <div className="btn-row"><button className="btn-s" onClick={cancelEditTrip}>Cancel</button><button className="btn-p" onClick={saveEditTrip}>Save</button></div>
+                      </div>
+                    ):(
                       <div key={t.id} className="trip-row">
                         <span style={{fontSize:22}}>✈️</span>
-                        <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#0B1929"}}>{t.dest}</div><div style={{fontSize:12,color:"#94A3B8"}}>{formatShort(t.start)}</div></div>
-                        <div style={{fontSize:11,fontWeight:700,background:"#E0F7FA",color:"#23B5D3",padding:"3px 9px",borderRadius:100}}>IJM</div>
+                        <div style={{flex:1,cursor:"pointer"}} onClick={()=>startEditTrip(t)}>
+                          <div style={{fontSize:15,fontWeight:700,color:"#0B1929"}}>{t.dest}</div>
+                          <div style={{fontSize:12,color:"#94A3B8"}}>{formatShort(t.start)}</div>
+                        </div>
+                        <div style={{fontSize:11,fontWeight:700,background:"#E0F7FA",color:"#23B5D3",padding:"3px 9px",borderRadius:100}}>{t.type||"IJM"}</div>
+                        <button className="todo-del" onClick={()=>deleteTrip(t.id)}>×</button>
                       </div>
-                    ))}
-                  </div>
-                </>
+                    )
+                  ))}
+                </div>
               )}
               <div className="sec"><div className="sec-title">Stats</div></div>
               <div className="stat-card">
