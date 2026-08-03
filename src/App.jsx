@@ -181,6 +181,7 @@ const ACHIEVEMENTS = [
 ];
 
 const STAGE_PCT = {"Not Started":0,"Written":20,"Demo":40,"Recording":60,"Mixing":80,"Complete":100};
+const APP_VERSION = "1.01";
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {
@@ -2263,6 +2264,11 @@ export default function App() {
               </div>
             </>
           )}
+
+          {/* VERSION FOOTER — unobtrusive, for fast visual validation between deploys */}
+          <div style={{textAlign:"center",padding:"18px 0 8px",fontSize:10,fontWeight:600,color:"#C7CDD3",letterSpacing:"0.06em"}}>
+            Meridian v{APP_VERSION}
+          </div>
         </div>
 
         {/* BOTTOM NAV — SVG line icons */}
