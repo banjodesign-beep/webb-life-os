@@ -24,6 +24,54 @@ const getLevelInfo = (xp) => {
   const tier=T.find(t=>xp<=t.max)||T[T.length-1]; const prev=T[T.indexOf(tier)-1],pm=prev?prev.max:-1;
   return {...tier,progress:tier.max===Infinity?100:Math.round(((xp-pm-1)/(tier.max-pm))*100)};
 };
+const JOURNAL_PROMPTS = [
+  "What deserves your best attention — not your most attention?",
+  "What did today ask of you that you weren't expecting?",
+  "Where did you feel most like yourself today?",
+  "What's one thing you're carrying that isn't actually yours to carry?",
+  "What would today have looked like if you'd trusted yourself more?",
+  "Who did you think about today, and what did that mean?",
+  "What's quietly working, that you haven't given yourself credit for?",
+  "What are you avoiding, and what is it costing you to avoid it?",
+  "What moment today would you want to remember in five years?",
+  "What did your body tell you today that your mind ignored?",
+  "Where did you show up small, when the moment called for more?",
+  "What's one honest sentence about how you actually feel right now?",
+  "What would you tell a friend who had the day you just had?",
+  "What's something you're proud of that no one else noticed?",
+  "What's the pace you're keeping — and is it the pace you chose?",
+  "What did you protect today, even in a small way?",
+  "Where did grace show up today, in a form you almost missed?",
+  "What's one thing that felt like enough, even if it wasn't much?",
+  "What are you learning to let go of?",
+  "What conversation today is still sitting with you?",
+  "What would it look like to be gentler with yourself tomorrow?",
+  "What's the truest thing you know today, even if it's small?",
+  "Where did you choose connection over convenience?",
+  "What's a fear you noticed today, and what did you do with it?",
+  "What did you build today, even if it doesn't show yet?",
+  "What's something ordinary today that was actually a gift?",
+  "Where do you need rest that you haven't given yourself?",
+  "What's one thing worth returning to tomorrow, exactly as it was?",
+  "What did you say no to today, and how did that feel?",
+  "What's a promise to yourself you kept without announcing it?",
+  "Where did today ask for patience you didn't know you had?",
+  "What's something you noticed today that you would have missed a year ago?",
+  "What's the story you're telling yourself about today — and is it true?",
+  "What would tomorrow look like if you led with curiosity instead of urgency?",
+  "What's one thing that felt hard and worth it at the same time?",
+  "Who showed up for you today, even in a small way?",
+  "What's a question you're sitting with, without needing to answer it yet?",
+  "What did you create space for today?",
+  "What's something you did today purely because it mattered, not because it was efficient?",
+  "What would the version of you a year from now want you to notice today?",
+];
+const getDailyJournalPrompt = () => {
+  const start=new Date(new Date().getFullYear(),0,0);
+  const day=Math.floor((new Date()-start)/864e5);
+  return JOURNAL_PROMPTS[day%JOURNAL_PROMPTS.length];
+};
+
 const getDailyScripture = () => {
   const SCRIPTURES=[
     {verse:"For I know the plans I have for you, declares the Lord — plans to prosper you and not to harm you, plans to give you hope and a future.",ref:"Jeremiah 29:11"},
@@ -179,7 +227,7 @@ const ACHIEVEMENTS = [
   {id:"a9",icon:"🌍",title:"Legacy Builder",check:s=>s.totalXP>=2500},
 ];
 
-const APP_VERSION = "1.03";
+const APP_VERSION = "1.10";
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {
@@ -691,6 +739,7 @@ export default function App() {
   const [tab,         setTab]         = useState("today");
   const [rhythmTab,   setRhythmTab]   = useState("weekly");
   const [loading,     setLoading]     = useState(true);
+  const [loadError,   setLoadError]   = useState(false);
   const [toast,       setToast]       = useState(null);
   const [toastKey,    setToastKey]    = useState(0);
   const [xpFloat,     setXpFloat]     = useState(null);
@@ -761,6 +810,28 @@ export default function App() {
   const [progressSubTab, setProgressSubTab] = useState("stats"); // stats | rhythms | platform | health
   const [addingSubFor, setAddingSubFor] = useState(null); // todo id currently adding a sub-item
   const [subInput, setSubInput] = useState("");
+  // Vision Anchor + Values (editable)
+  const [visionAnchor, setVisionAnchor] = useState("Annie's path built on depth. River's ceiling limited by talent only. Jules is the primary relationship. A platform that outlasts the role. An album completed. Parents cared for.");
+  const [editingVision, setEditingVision] = useState(false);
+  const [visionDraft, setVisionDraft] = useState("");
+  const [values, setValues] = useState([
+    {n:"Stewardship",d:"Care for what God entrusted: health, family, finances, talent, platform."},
+    {n:"Service",d:"Act humbly. Serve others. Family presence. Platform for others."},
+    {n:"Scale",d:"Build and multiply. Legacy for children. Platform that outlasts the role."},
+    {n:"Sweat",d:"Work hard. God-honoring things face natural resistance."},
+    {n:"Sabbath",d:"Three Sundays per month minimum. Rest in sovereignty."},
+  ]);
+  const [editingValueIdx, setEditingValueIdx] = useState(null);
+  const [valueDraft, setValueDraft] = useState({n:"",d:""});
+  // Quick Capture — lingering notes on the main screen
+  const [quickNotes, setQuickNotes] = useState([]); // [{id,text,kind,at}]
+  const [quickInput, setQuickInput] = useState("");
+  // Keystone — today's one thing (auto-suggested, overridable)
+  const [keystoneOverrideId, setKeystoneOverrideId] = useState(null);
+  const [keystoneWhy, setKeystoneWhy] = useState({}); // {taskId: "why it matters" text}
+  const [keystoneMin, setKeystoneMin] = useState({}); // {taskId: "minimum version" text}
+  // Journal prompt of the day
+  const [journalPromptSeed] = useState(()=>Math.floor(Math.random()*10000));
   const [avatar,      setAvatar]      = useState(null);   // base64 data URL
   // Health
   const [proteinLog,  setProteinLog]  = useState([]);   // [{id,label,grams,at}] — today only
@@ -782,13 +853,15 @@ export default function App() {
   },[]);
 
   // ── LOAD ─────────────────────────────────────────────────────────────
-  useEffect(()=>{
-    async function loadAll() {
+  const loadAll = useCallback(async () => {
+      setLoadError(false);
       const today = todayKey();
       const mode  = getModeForDate(today);
       const dkey  = getDayKey(today, mode);
       try {
-        const results = await Promise.all([
+        const timeout = new Promise((_,reject)=>setTimeout(()=>reject(new Error("timeout")),8000));
+        const results = await Promise.race([
+          Promise.all([
           load(dkey), load(`cl-weekly-${weekKey()}`), load(`cl-monthly-${monthKey()}`),
           load(`cl-annual-${yearKey()}`), load(`cl-ijm-${weekKey()}`), load(`cl-platform-${monthKey()}`),
           load("wb-goals-v5"),
@@ -798,6 +871,8 @@ export default function App() {
           load(`wb-journal-${yearKey()}`), load(`wb-weekplan-${weekKey()}`),
           load("wb-planarchive"), load("wb-todos-v1"), load("wb-custom-lists"),
           load(`wb-history-${yearKey()}`),
+          ]),
+          timeout,
         ]);
         const [ds,ws,ms,as,ij,plt,g,fl,fin,xp,s,ach,tl,tm,dest,jrnl,wp,pa,tod,cl,hist] = results;
         if(ds)  setDayStates(p=>({...p,[dkey]:ds}));
@@ -830,6 +905,9 @@ export default function App() {
         const mAck = await load("wb-milestone-ack"); if(mAck) setMilestoneAck(mAck);
         const restDay = await load(`wb-restday-${today}`); if(restDay) setRestDayToday(true);
         const lesson = await load(`wb-lesson-${weekKey()}`); if(lesson) setLessonThisWeek(true);
+        const va = await load("wb-vision-anchor"); if(va) setVisionAnchor(va);
+        const vals = await load("wb-values-v1"); if(vals) setValues(vals);
+        const qc = await load("wb-quick-notes-v1"); if(qc) setQuickNotes(qc);
 
         // Weekly grace-token accrual — grant +1 the first time this week is seen.
         let tokens = (await load("wb-grace-tokens")) || 0;
@@ -841,11 +919,15 @@ export default function App() {
         }
         setGraceTokens(tokens);
         setGraceAccruedWeek(weekKey());
-      } catch(e){console.error("Load error:",e);}
-      setLoading(false);
-    }
-    loadAll();
-  },[]);
+        setLoading(false);
+      } catch(e){
+        console.error("Load error:",e);
+        setLoadError(true);
+        setLoading(false);
+      }
+  }, []);
+
+  useEffect(()=>{ loadAll(); },[loadAll]);
 
   // ── DERIVED STATE ────────────────────────────────────────────────────
   const today     = todayKey();
@@ -861,6 +943,35 @@ export default function App() {
   const coreDone  = (state)=>coreItems.every(i=>state[i.id]?.checked);
   const healthCoreItems = coreItems.filter(i=>i.cat==="health");
   const healthCoreDone  = (state)=>healthCoreItems.length===0||healthCoreItems.every(i=>state[i.id]?.checked);
+
+  // ── KEYSTONE (Phase 1, hybrid: auto-suggest + manual override) ──────
+  // Auto-picks the first unchecked core item as today's one thing; a
+  // person can override by tapping "Choose a different keystone" on any
+  // other core item. Falls back to the first core item once everything's
+  // done, so the card never goes empty.
+  const keystoneItem = (keystoneOverrideId && coreItems.find(i=>i.id===keystoneOverrideId))
+    || coreItems.find(i=>!todayState[i.id]?.checked)
+    || coreItems[0]
+    || null;
+  const maintenanceItems = coreItems.filter(i=>i.id!==keystoneItem?.id);
+  const bonusItems = todayItems.filter(i=>i.w==="bonus");
+  const maintDoneCount = maintenanceItems.filter(i=>todayState[i.id]?.checked).length;
+
+  // ── CONSISTENCY (Phase 3) — cheap: history is already written daily ──
+  const consistency14 = (()=>{
+    const days = getPastDays(14);
+    const scored = days.filter(d=>history[d]);
+    if(scored.length===0) return null;
+    return Math.round(scored.reduce((s,d)=>s+(history[d]?.pct||0),0)/scored.length);
+  })();
+
+  // ── YEARLY GOAL, SOFTLY SURFACED (doesn't touch XP/streak scoring) ──
+  // A different open goal each day, so the year doesn't get lost inside
+  // the week. Deterministic per day so it doesn't jump around on re-render.
+  const dayOfYear = Math.floor((new Date()-new Date(new Date().getFullYear(),0,0))/864e5);
+  const openGoals = goals.filter(g=>!g.completed);
+  const surfacedGoal = openGoals.length>0 ? openGoals[dayOfYear%openGoals.length] : null;
+
 
   const todayPts  = todayItems.reduce((s,i)=>s+(todayState[i.id]?.checked?i.xp:0),0);
   const todayMax  = todayItems.reduce((s,i)=>s+i.xp,0);
@@ -1088,6 +1199,53 @@ export default function App() {
   const addEditorItem=(lk)=>setEditLists(p=>({...p,[lk]:[...(p[lk]||[]),{id:`c-${Date.now()}`,text:"New item",sub:"Description",xp:10,icon:"⭐"}]}));
   const updEditorItem=(lk,idx,field,val)=>setEditLists(p=>{const l=[...(p[lk]||[])];l[idx]={...l[idx],[field]:field==="xp"?parseInt(val)||0:val};return{...p,[lk]:l};});
   const delEditorItem=(lk,idx)=>setEditLists(p=>({...p,[lk]:p[lk].filter((_,i)=>i!==idx)}));
+  const moveEditorItem=(lk,idx,dir)=>setEditLists(p=>{
+    const arr=[...p[lk]];const t=idx+dir;
+    if(t<0||t>=arr.length)return p;
+    [arr[idx],arr[t]]=[arr[t],arr[idx]];
+    return {...p,[lk]:arr};
+  });
+
+  // ── VISION ANCHOR ─────────────────────────────────────────────────
+  const startEditVision=()=>{setVisionDraft(visionAnchor);setEditingVision(true);};
+  const saveVision=async()=>{
+    const v=visionDraft.trim()||visionAnchor;
+    setVisionAnchor(v);await save("wb-vision-anchor",v);
+    setEditingVision(false);
+  };
+
+  // ── VALUES (the five S's) ────────────────────────────────────────
+  const startEditValue=(idx)=>{setValueDraft({n:values[idx].n,d:values[idx].d});setEditingValueIdx(idx);};
+  const saveValue=async()=>{
+    const u=values.map((v,i)=>i===editingValueIdx?{n:valueDraft.n.trim()||v.n,d:valueDraft.d.trim()||v.d}:v);
+    setValues(u);await save("wb-values-v1",u);
+    setEditingValueIdx(null);
+  };
+
+  // ── QUICK CAPTURE — lingering notes ─────────────────────────────────
+  // Stays on the main screen. A note doesn't need a home yet — it just
+  // needs somewhere to sit until it does.
+  const addQuickNote=async(kind="reflection")=>{
+    if(!quickInput.trim())return;
+    const n={id:`qc-${Date.now()}`,text:quickInput.trim(),kind,at:new Date().toISOString()};
+    const nl=[n,...quickNotes];setQuickNotes(nl);await save("wb-quick-notes-v1",nl);
+    setQuickInput("");
+  };
+  const deleteQuickNote=async(id)=>{
+    const nl=quickNotes.filter(n=>n.id!==id);setQuickNotes(nl);await save("wb-quick-notes-v1",nl);
+  };
+  const promoteQuickNote=async(note,dest)=>{
+    // Send a lingering note somewhere it can actually live — journal or a task.
+    if(dest==="journal"){
+      const merged = journalInput ? `${journalInput}\n\n${note.text}` : note.text;
+      await saveJournalEntry(merged);
+    } else if(dest==="task"){
+      const u=[...todos,{id:`t-${Date.now()}`,text:note.text,done:false,categoryId:activeCatId,subitems:[]}];
+      setTodos(u);await save("wb-todos-v1",u);
+    }
+    deleteQuickNote(note.id);
+    showToast(dest==="journal"?"Moved into today's reflection":"Added to your tasks");
+  };
 
   // ── JOURNAL ──────────────────────────────────────────────────────────
   const saveJournalEntry=async(text)=>{
@@ -1259,6 +1417,18 @@ export default function App() {
     </>
   );
 
+  if(loadError) return(
+    <>
+      <style>{CSS}</style>
+      <div className="loading">
+        <AppIcon size={56} style={{marginBottom:20,opacity:0.6}}/>
+        <div style={{fontSize:16,fontWeight:700,color:"#DFE0E2",marginBottom:8,textAlign:"center",padding:"0 30px"}}>Couldn't load your day</div>
+        <div style={{fontSize:13,color:"#4A5A62",marginBottom:24,textAlign:"center",padding:"0 40px",lineHeight:1.6}}>Your data is still safe — this device just couldn't reach it. Check your connection and try again.</div>
+        <button onClick={()=>{setLoading(true);loadAll();}} style={{padding:"13px 28px",borderRadius:10,border:"none",background:"#23B5D3",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Retry</button>
+      </div>
+    </>
+  );
+
   return (
     <>
       <style>{CSS}</style>
@@ -1418,6 +1588,7 @@ export default function App() {
                     <div className="pts-right">
                       <span className="pts-icon">{todayMode==="sunday"?"🕊️":todayMode==="saturday"?"🌄":travelMode?"✈️":"☀️"}</span>
                       <div className="pts-streak">🔥 {streaks.current}-day streak</div>
+                      {consistency14!==null&&<div className="pts-streak" style={{color:"rgba(255,255,255,0.5)",marginTop:2}}>the return is the win — {consistency14}% these 2 weeks</div>}
                     </div>
                   </div>
                   <div className="h-prog-row"><div className="h-prog-label">Today's completion</div><div className="h-prog-pct">{viewDate?(history[viewDate]?.pct||0):todayPct}%</div></div>
@@ -1501,8 +1672,97 @@ export default function App() {
                 </>
               ):(
                 <>
-                  <div className="sec"><div className="sec-title">{todayMode==="sunday"?"Sunday":todayMode==="saturday"?"Saturday":travelMode?"Travel":"Daily"}</div><div className="sec-sub">{Object.values(todayState).filter(v=>v?.checked).length}/{todayItems.length} done</div></div>
-                  <CheckGroup items={todayItems} state={todayState} onToggle={handleToggle} bouncing={bouncing} travel={travelMode}/>
+                  <div className="sec"><div className="sec-title">Today</div><div className="sec-sub">{Object.values(todayState).filter(v=>v?.checked).length}/{todayItems.length} done</div></div>
+
+                  <div style={{background:"#EAF7FB",border:"1px solid rgba(35,181,211,0.2)",borderRadius:12,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#0D6B85",lineHeight:1.5}}>
+                    ✦ A gentle target: one keystone, a couple of steadying things. Bonus is truly optional.
+                  </div>
+
+                  {keystoneItem && (
+                    <div style={{background:"linear-gradient(145deg,#1A93AC,#23B5D3)",borderRadius:20,padding:22,marginBottom:14,position:"relative",overflow:"hidden",boxShadow:"0 8px 24px rgba(35,181,211,0.25)"}}>
+                      <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.75)",background:"rgba(255,255,255,0.15)",display:"inline-block",padding:"4px 10px",borderRadius:100,marginBottom:12}}>Today's Keystone</div>
+                      <div style={{fontSize:21,fontWeight:800,color:"#fff",marginBottom:14,lineHeight:1.25}}>{keystoneItem.text}</div>
+                      <div style={{display:"flex",gap:20,marginBottom:16,flexWrap:"wrap"}}>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Why it matters</div>
+                          <div style={{fontSize:12.5,color:"rgba(255,255,255,0.92)",lineHeight:1.5}}>{keystoneWhy[keystoneItem.id]||keystoneItem.sub}</div>
+                        </div>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Minimum version</div>
+                          <div style={{fontSize:12.5,color:"rgba(255,255,255,0.92)",lineHeight:1.5}}>{keystoneMin[keystoneItem.id]||"Just start. A little counts."}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                        <button onClick={()=>handleToggle(keystoneItem.id,keystoneItem,todayState)} style={{background:"#fff",color:"#0D6B85",border:"none",borderRadius:100,padding:"10px 20px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                          {todayState[keystoneItem.id]?.checked?"✓ Complete":"Mark complete"}
+                        </button>
+                        {coreItems.length>1 && (
+                          <button onClick={()=>{
+                            const others = coreItems.filter(i=>i.id!==keystoneItem.id);
+                            if(others.length===0)return;
+                            const idx = others.findIndex(i=>i.id===keystoneOverrideId);
+                            setKeystoneOverrideId(others[(idx+1)%others.length].id);
+                          }} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>Choose a different keystone</button>
+                        )}
+                      </div>
+                      <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid rgba(255,255,255,0.15)",fontSize:11.5,color:"rgba(255,255,255,0.7)",lineHeight:1.6,fontStyle:"italic"}}>
+                        Why today matters: {visionAnchor.length>140?visionAnchor.slice(0,140)+"…":visionAnchor}
+                      </div>
+                    </div>
+                  )}
+
+                  {maintenanceItems.length>0&&(
+                    <>
+                      <div className="sec"><div className="sec-title">Maintenance</div><div className="sec-sub">{maintDoneCount}/{maintenanceItems.length} · the steadying things</div></div>
+                      <CheckGroup items={maintenanceItems} state={todayState} onToggle={handleToggle} bouncing={bouncing} travel={travelMode}/>
+                    </>
+                  )}
+
+                  {bonusItems.length>0&&(
+                    <>
+                      <div className="sec"><div className="sec-title">If there's room</div><div className="sec-sub">a little extra, never a debt</div></div>
+                      <CheckGroup items={bonusItems} state={todayState} onToggle={handleToggle} bouncing={bouncing} travel={travelMode}/>
+                    </>
+                  )}
+
+                  {surfacedGoal&&(
+                    <>
+                      <div className="sec"><div className="sec-title">The Larger Arc</div><div className="sec-sub">so the year doesn't get lost</div></div>
+                      <div className="g-card" style={{borderLeft:`3px solid ${DOMAIN_CFG[surfacedGoal.domain]?.color||"#23B5D3"}`}}>
+                        <div style={{fontSize:15,fontWeight:700,color:"#0B1929",marginBottom:4}}>{surfacedGoal.title}</div>
+                        <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>{surfacedGoal.detail} — a small action keeps this alive.</div>
+                        <div className="g-prog-row" style={{marginBottom:0}}>
+                          <div className="g-prog-track"><div className="g-prog-fill" style={{width:`${surfacedGoal.progress}%`,background:DOMAIN_CFG[surfacedGoal.domain]?.color}}/></div>
+                          <div className="g-prog-pct">{surfacedGoal.progress}%</div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="sec"><div className="sec-title">Quick Capture</div><div className="sec-sub">keep the useful bits close</div></div>
+                  <div className="add-form" style={{marginBottom:12}}>
+                    <div style={{display:"flex",gap:8}}>
+                      <input className="field" style={{marginBottom:0}} placeholder="A thought, a note, something worth keeping…" value={quickInput} onChange={e=>setQuickInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addQuickNote()}/>
+                      <button onClick={()=>addQuickNote()} className="todo-add-btn">+</button>
+                    </div>
+                  </div>
+                  {quickNotes.length>0&&(
+                    <div className="check-card" style={{marginBottom:12}}>
+                      {quickNotes.map(n=>(
+                        <div key={n.id} className="c-row" style={{cursor:"default"}}>
+                          <div className="c-body">
+                            <div className="c-main" style={{fontWeight:500}}>{n.text}</div>
+                            <div className="c-hint">{new Date(n.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+                          </div>
+                          <div style={{display:"flex",gap:6}}>
+                            <button onClick={()=>promoteQuickNote(n,"journal")} title="Move to journal" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#23B5D3"}}>📓</button>
+                            <button onClick={()=>promoteQuickNote(n,"task")} title="Turn into a task" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#23B5D3"}}>✓</button>
+                            <button onClick={()=>deleteQuickNote(n.id)} className="todo-del">×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* ── TASKS WITH CATEGORIES ── */}
                   <div className="sec">
@@ -2009,8 +2269,18 @@ export default function App() {
                   <div className="sec"><div className="sec-title">Carry Forward</div><div className="sec-sub">Anything unfinished that still matters?</div></div>
                   <textarea className="journal-input" rows={2} placeholder={"What didn't get done but still needs to?"} value={weekPlan.carryForward||""} onChange={e=>saveWeekPlan({...weekPlan,carryForward:e.target.value})} style={{marginBottom:14}}/>
                   <div className="vision-card">
-                    <div style={{fontSize:14,fontWeight:700,color:"#2563EB",marginBottom:8}}>Vision Anchor</div>
-                    <div style={{fontSize:13,color:"#2A4050",lineHeight:1.7}}>Annie's path built on depth. River's ceiling limited by talent only. Jules is the primary relationship. A platform that outlasts the role. An album completed. Parents cared for.</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"#2563EB"}}>Vision Anchor</div>
+                      {!editingVision&&<button onClick={startEditVision} style={{background:"none",border:"none",color:"#94A3B8",fontSize:12,fontWeight:700,cursor:"pointer"}}>Edit</button>}
+                    </div>
+                    {editingVision?(
+                      <>
+                        <textarea className="journal-input" rows={4} value={visionDraft} onChange={e=>setVisionDraft(e.target.value)} style={{marginBottom:10}}/>
+                        <div className="btn-row"><button className="btn-s" onClick={()=>setEditingVision(false)}>Cancel</button><button className="btn-p" onClick={saveVision}>Save</button></div>
+                      </>
+                    ):(
+                      <div style={{fontSize:13,color:"#2A4050",lineHeight:1.7}}>{visionAnchor}</div>
+                    )}
                   </div>
                 </>
               )}
@@ -2064,6 +2334,11 @@ export default function App() {
                 </>
               ):(
                 <>
+                  <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:16,padding:18,marginBottom:14,boxShadow:"0 2px 12px rgba(7,16,19,0.05)"}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#23B5D3",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>A question for today</div>
+                    <div style={{fontSize:17,fontWeight:700,color:"#0B1929",lineHeight:1.4,marginBottom:6}}>{getDailyJournalPrompt()}</div>
+                    <div style={{fontSize:12,color:"#94A3B8",fontStyle:"italic"}}>Let the answer be smaller than you think.</div>
+                  </div>
                   <div className="sec"><div className="sec-title">Today's Reflection</div><div className="sec-sub">{new Date().toLocaleDateString("en-US",{weekday:"long"})}</div></div>
                   <textarea className="journal-input" rows={8} placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"} value={journalInput} onChange={e=>saveJournalEntry(e.target.value)} style={{marginBottom:14}}/>
                   {Object.entries(journal).filter(([d,t])=>d!==today&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5).length>0&&(
@@ -2085,8 +2360,19 @@ export default function App() {
               )}
 
               <div className="vision-card" style={{marginTop:8}}>
-                {[["Stewardship","Care for what God entrusted: health, family, finances, talent, platform."],["Service","Act humbly. IJM. Family presence. Platform for others."],["Scale","Build and multiply. Legacy for children. Platform that outlasts the role."],["Sweat","Work hard. God-honoring things face natural resistance."],["Sabbath","Three Sundays per month minimum. Rest in sovereignty."]].map(([n,d])=>(
-                  <div className="tenet-row" key={n}><div className="tenet-s">S</div><div><div style={{fontSize:15,fontWeight:700,color:"#0B1929",marginBottom:2}}>{n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{d}</div></div></div>
+                {values.map((v,i)=>(
+                  editingValueIdx===i?(
+                    <div key={v.n} className="add-form" style={{marginBottom:8}}>
+                      <input className="field" placeholder="Value name…" value={valueDraft.n} onChange={e=>setValueDraft(p=>({...p,n:e.target.value}))}/>
+                      <input className="field" placeholder="Description…" value={valueDraft.d} onChange={e=>setValueDraft(p=>({...p,d:e.target.value}))}/>
+                      <div className="btn-row"><button className="btn-s" onClick={()=>setEditingValueIdx(null)}>Cancel</button><button className="btn-p" onClick={saveValue}>Save</button></div>
+                    </div>
+                  ):(
+                    <div className="tenet-row" key={v.n} onClick={()=>startEditValue(i)} style={{cursor:"pointer"}}>
+                      <div className="tenet-s">{v.n.slice(0,1)}</div>
+                      <div><div style={{fontSize:15,fontWeight:700,color:"#0B1929",marginBottom:2}}>{v.n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{v.d}</div></div>
+                    </div>
+                  )
                 ))}
               </div>
             </>
