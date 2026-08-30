@@ -4,6 +4,9 @@ import { resolveStreakAdvance, checkMilestone, accrueGraceToken } from "./lib/st
 import { CATEGORY_LABELS, GRACE_TOKENS_PER_WEEK, MILESTONE_BONUS_XP, generateMilestoneList } from "./config/meridianConfig.js";
 import MilestoneJourney from "./components/MilestoneJourney.jsx";
 import MilestoneSplash from "./components/MilestoneSplash.jsx";
+import { pickKeystone, pickSabbathInvitation } from "./config/keystoneLibrary.js";
+import { DEFAULT_ARCS, arcProgress, nextStep, isArcComplete, pickArc } from "./config/arcs.js";
+import { buildWeeklyReview } from "./lib/weeklyReview.js";
 
 // ── DATE HELPERS ──────────────────────────────────────────────────────
 const localDate = (d = new Date()) => {
@@ -194,24 +197,34 @@ const DEFAULT_LISTS = {
 };
 
 const DEFAULT_GOALS = [
-  {id:"g0",domain:"family",title:"Annie\'s college pathway — depth over compliance",detail:"Theatre/Arts as spike.",target:"2029",progress:20},
-  {id:"g1",domain:"family",title:"River\'s ceiling limited only by talent",detail:"Pride Club, BC, daily training.",target:"Ongoing",progress:35},
+  // NOTE: the Larger Arc now runs off arcs.js (checklists, derived progress).
+  // This list remains for the Goals view. Progress values corrected — several
+  // were showing stale figures (529s read 0% despite being open and funded).
+  {id:"g0",domain:"family",title:"Annie\'s college pathway — depth over compliance",detail:"Theatre/Arts as spike. TCA College Pathways decision live.",target:"2029",progress:25},
+  {id:"g1",domain:"family",title:"River\'s ceiling limited only by talent",detail:"Pride Club. Home training routine built.",target:"Ongoing",progress:40},
   {id:"g2",domain:"family",title:"Parents feel cared for",detail:"Conversation guide. Regular contact.",target:"2027",progress:15},
   {id:"g3",domain:"family",title:"20th anniversary marked",detail:"December 2, 2026.",target:"Dec 2026",progress:10},
   {id:"g4",domain:"platform",title:"The Sequence — manuscript complete",detail:"LinkedIn monthly. Ken Caldwell.",target:"Q1 2027",progress:20},
   {id:"g5",domain:"platform",title:"Recalibrated — publisher secured",detail:"Zondervan, IVP, WaterBrook.",target:"2027",progress:30},
-  {id:"g6",domain:"platform",title:"BenWebb.com live",detail:"One home for all three projects.",target:"Q2 2026",progress:5},
-  {id:"g7",domain:"financial",title:"529 accounts open — Annie and River",detail:"Colorado CollegeInvest.",target:"Q2 2026",progress:0},
-  {id:"g8",domain:"financial",title:"Household dashboard Jules-managed",detail:"Five-tab Excel. Monthly rhythm.",target:"Q2 2026",progress:70},
-  {id:"g9",domain:"health",title:"Strength/sprint as primary modality",detail:"3x per week minimum.",target:"Ongoing",progress:40},
-  {id:"g10",domain:"health",title:"Sleep kit optimized for travel",detail:"Eye mask, earplugs. Every trip.",target:"Q2 2026",progress:50},
+  {id:"g6",domain:"platform",title:"BenWebb.com live",detail:"One home for all three projects.",target:"2027",progress:5},
+  {id:"g7",domain:"financial",title:"529s open, funded, stepping up",detail:"CollegeInvest — auto-contributions and step-up live.",target:"Done",progress:90},
+  {id:"g8",domain:"financial",title:"Household dashboard Jules-managed",detail:"Deployed. Monthly rhythm forming.",target:"Ongoing",progress:80},
+  {id:"g17",domain:"financial",title:"Spousal Roth for Jules",detail:"Identified, not yet opened.",target:"2027",progress:0},
+  {id:"g18",domain:"financial",title:"Fee-only fiduciary planner engaged",detail:"Once household surplus is established.",target:"2027",progress:0},
+  {id:"g9",domain:"health",title:"Strength as primary modality",detail:"Lower body is the lever. Shoulder-safe.",target:"Ongoing",progress:40},
+  {id:"g10",domain:"health",title:"Travel doesn\'t dismantle the routine",detail:"Sleep kit, hotel-room session, airport protein.",target:"Ongoing",progress:50},
+  {id:"g16",domain:"faith",title:"Living from secure humility",detail:"Who am I? What am I worth? Am I safe?",target:"Ongoing",progress:15},
+  {id:"g15",domain:"faith",title:"Three full Sabbaths a month",detail:"Worship team commitments factored in.",target:"Ongoing",progress:35},
 ];
 
 const DOMAIN_CFG = {
-  family:{label:"Family",color:"#23B5D3"},
-  platform:{label:"Platform",color:"#A2AEBB"},
-  financial:{label:"Financial",color:"#75ABBC"},
-  health:{label:"Health",color:"#1A8FA8"},
+  family:{label:"Family",color:"#2B5F7D"},
+  platform:{label:"Platform",color:"#7A5C3E"},
+  financial:{label:"Financial",color:"#3F6B54"},
+  health:{label:"Health",color:"#8C4A3F"},
+  faith:{label:"Faith",color:"#4C5470"},
+  leadership:{label:"Leadership",color:"#55606B"},
+  identity:{label:"Identity",color:"#6B5344"},
 };
 
 const ACHIEVEMENTS = [
@@ -233,7 +246,7 @@ const APP_VERSION = "1.10";
 function Confetti() {
   const pieces = Array.from({length:50},(_,i)=>({
     id:i,x:Math.random()*100,
-    color:["#2563EB","#60A5FA","#34D399","#A78BFA","#FBBF24","#F472B6"][Math.floor(Math.random()*6)],
+    color:["#35617E","#60A5FA","#34D399","#A78BFA","#FBBF24","#F472B6"][Math.floor(Math.random()*6)],
     size:Math.random()*8+4,delay:Math.random()*0.8,dur:Math.random()*1.5+1.5,
   }));
   return (
@@ -246,7 +259,7 @@ function Confetti() {
 }
 function XPFloat({amount,onDone}) {
   useEffect(()=>{const t=setTimeout(onDone,1200);return()=>clearTimeout(t);},[]);
-  return <div style={{position:"fixed",bottom:140,right:24,fontWeight:800,fontSize:18,color:"#2563EB",animation:"xpFloat 1.2s ease-out forwards",pointerEvents:"none",zIndex:500}}>+{amount} pts</div>;
+  return <div style={{position:"fixed",bottom:140,right:24,fontWeight:800,fontSize:18,color:"#35617E",animation:"xpFloat 1.2s ease-out forwards",pointerEvents:"none",zIndex:500}}>+{amount} pts</div>;
 }
 
 // ── APP ICON ──────────────────────────────────────────────────────────
@@ -275,7 +288,7 @@ function SplashScreen({onDone}) {
   return (
     <div style={{
       position:"fixed",inset:0,zIndex:999,
-      background:"#071013",
+      background:"#10171C",
       display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
       padding:40,
       opacity:phase===3?0:1,
@@ -303,7 +316,7 @@ function SplashScreen({onDone}) {
 
       {/* MERIDIAN wordmark */}
       <div style={{
-        fontSize:42,fontWeight:900,color:"#DFE0E2",
+        fontSize:42,fontWeight:900,color:"#DCE2E6",
         letterSpacing:"0.28em",textTransform:"uppercase",
         marginBottom:8,zIndex:1,
         opacity:phase>=1?1:0,
@@ -318,7 +331,7 @@ function SplashScreen({onDone}) {
         transition:"opacity 0.5s ease 0.2s",
       }}>
         <div style={{height:"1px",width:32,background:"rgba(35,181,211,0.4)"}}/>
-        <div style={{fontSize:10,fontWeight:800,color:"#23B5D3",letterSpacing:"0.2em"}}>{dateStr} · {modeLabel}</div>
+        <div style={{fontSize:10,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.2em"}}>{dateStr} · {modeLabel}</div>
         <div style={{height:"1px",width:32,background:"rgba(35,181,211,0.4)"}}/>
       </div>
 
@@ -331,10 +344,10 @@ function SplashScreen({onDone}) {
         borderTop:"1px solid rgba(255,255,255,0.06)",
         paddingTop:24,
       }}>
-        <div style={{fontSize:13,fontStyle:"italic",color:"#4A5A62",lineHeight:1.7,marginBottom:10}}>
+        <div style={{fontSize:13,fontStyle:"italic",color:"#454F56",lineHeight:1.7,marginBottom:10}}>
           "{s.verse.length>120?s.verse.slice(0,120)+"…":s.verse}"
         </div>
-        <div style={{fontSize:9,fontWeight:800,color:"#23B5D3",letterSpacing:"0.18em",textTransform:"uppercase"}}>{s.ref}</div>
+        <div style={{fontSize:9,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.18em",textTransform:"uppercase"}}>{s.ref}</div>
       </div>
     </div>
   );
@@ -379,11 +392,11 @@ const CSS = `
 @keyframes iconPop{0%{transform:scale(0.4);opacity:0;}60%{transform:scale(1.1);}100%{transform:scale(1);opacity:1;}}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body,html{
-  background:#E8F4F8;
+  background:#F1F3F4;
   background-image:
-    linear-gradient(180deg,#FFFFFF 0%,#EAF4F8 40%,#C8DFE8 100%);
+    linear-gradient(180deg,#FFFFFF 0%,#F2F4F5 45%,#E2E7EA 100%);
   background-attachment:fixed;
-  color:#071013;
+  color:#10171C;
   font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif;
   -webkit-font-smoothing:antialiased;
 }
@@ -401,17 +414,17 @@ button,input,textarea,select{font-family:inherit;}
 }
 .hdr-inner{display:flex;align-items:center;justify-content:space-between;position:relative;}
 .hdr-left{display:flex;align-items:center;gap:10px;}
-.hdr-eyebrow{font-size:9px;font-weight:800;letter-spacing:0.22em;text-transform:uppercase;color:#23B5D3;margin-bottom:2px;}
-.hdr-date{font-size:19px;font-weight:700;color:#071013;letter-spacing:-0.02em;line-height:1.1;}
+.hdr-eyebrow{font-size:9px;font-weight:800;letter-spacing:0.22em;text-transform:uppercase;color:#2B5F7D;margin-bottom:2px;}
+.hdr-date{font-size:19px;font-weight:700;color:#10171C;letter-spacing:-0.02em;line-height:1.1;}
 .hdr-right{display:flex;align-items:center;gap:8px;}
 .gear-btn{width:34px;height:34px;border-radius:8px;background:rgba(35,181,211,0.08);border:1px solid rgba(35,181,211,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:all 0.2s;}
 
 /* HERO — keeps dark for contrast and drama */
 .hero{border-radius:20px;padding:24px 20px 20px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(7,16,19,0.15);}
-.hero-home{background:linear-gradient(145deg,#071013,#0D2030,#0F2D3A,#0A2540);}
-.hero-travel{background:linear-gradient(145deg,#071013,#0A2030,#0F2840,#0A2035);}
-.hero-saturday{background:linear-gradient(145deg,#071013,#0D1F18,#102818,#0F3020);}
-.hero-sunday{background:linear-gradient(145deg,#12080A,#1A0A10,#200E14,#180C12);}
+.hero-home{background:linear-gradient(145deg,#141A1F,#182530,#1B3443,#20455A);}
+.hero-travel{background:linear-gradient(145deg,#161B1E,#1D2A31,#243B44,#2A4C57);}
+.hero-saturday{background:linear-gradient(145deg,#151A17,#1C2620,#243328,#2E4433);}
+.hero-sunday{background:linear-gradient(145deg,#1A1714,#251F19,#33291F,#41352A);}
 .hero::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent);}
 .hero::after{content:"";position:absolute;top:-60px;right:-40px;width:200px;height:200px;background:radial-gradient(circle,rgba(35,181,211,0.12),transparent 70%);animation:glow 4s ease-in-out infinite;}
 
@@ -421,16 +434,16 @@ button,input,textarea,select{font-family:inherit;}
 .pts-label{font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.14em;text-transform:uppercase;margin-top:4px;}
 .pts-right{text-align:right;padding-bottom:6px;}
 .pts-icon{font-size:36px;line-height:1;display:block;}
-.pts-streak{font-size:10px;font-weight:700;color:#23B5D3;margin-top:6px;letter-spacing:0.1em;text-transform:uppercase;}
+.pts-streak{font-size:10px;font-weight:700;color:#2B5F7D;margin-top:6px;letter-spacing:0.1em;text-transform:uppercase;}
 .h-prog-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;position:relative;z-index:1;}
 .h-prog-label{font-size:9px;font-weight:800;color:rgba(255,255,255,0.4);letter-spacing:0.16em;text-transform:uppercase;}
-.h-prog-pct{font-size:15px;font-weight:800;color:#23B5D3;}
+.h-prog-pct{font-size:15px;font-weight:800;color:#2B5F7D;}
 .h-track{height:2px;background:rgba(255,255,255,0.1);overflow:hidden;margin-bottom:18px;position:relative;z-index:1;}
 .h-fill{height:100%;transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
-.h-fill-home{background:linear-gradient(90deg,#23B5D3,#75ABBC);}
-.h-fill-travel{background:linear-gradient(90deg,#23B5D3,#75ABBC);}
-.h-fill-saturday{background:linear-gradient(90deg,#23B5D3,#A2AEBB);}
-.h-fill-sunday{background:linear-gradient(90deg,#75ABBC,#A2AEBB);}
+.h-fill-home{background:linear-gradient(90deg,#2B5F7D,#6B8494);}
+.h-fill-travel{background:linear-gradient(90deg,#2B5F7D,#6B8494);}
+.h-fill-saturday{background:linear-gradient(90deg,#2B5F7D,#8B99A3);}
+.h-fill-sunday{background:linear-gradient(90deg,#6B8494,#8B99A3);}
 .h-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);position:relative;z-index:1;border-radius:2px;overflow:hidden;}
 .h-stat{background:rgba(0,0,0,0.3);padding:12px 10px;}
 .h-stat-val{font-size:20px;font-weight:800;color:#FFFFFF;letter-spacing:-0.02em;}
@@ -441,41 +454,41 @@ button,input,textarea,select{font-family:inherit;}
 .mode-badge-sun{background:rgba(117,171,188,0.15);border:1px solid rgba(117,171,188,0.25);}
 .mode-badge-sat{background:rgba(35,181,211,0.1);border:1px solid rgba(35,181,211,0.2);}
 .mode-badge-travel{background:rgba(35,181,211,0.1);border:1px solid rgba(35,181,211,0.2);}
-.mb-text{font-size:13px;font-weight:800;color:#071013;letter-spacing:0.04em;text-transform:uppercase;}
-.mb-sub{font-size:11px;color:#4A7080;margin-top:2px;}
+.mb-text{font-size:13px;font-weight:800;color:#10171C;letter-spacing:0.04em;text-transform:uppercase;}
+.mb-sub{font-size:11px;color:#3E525E;margin-top:2px;}
 
 /* XP CARD */
 .xp-card{background:rgba(255,255,255,0.85);border:1px solid rgba(35,181,211,0.12);border-radius:14px;padding:14px 18px;margin-bottom:12px;box-shadow:0 2px 12px rgba(7,16,19,0.06);}
 .xp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
-.xp-level{font-size:12px;font-weight:800;color:#071013;letter-spacing:0.08em;text-transform:uppercase;}
-.xp-pts{font-size:12px;font-weight:600;color:#7A9AAA;letter-spacing:0.04em;}
+.xp-level{font-size:12px;font-weight:800;color:#10171C;letter-spacing:0.08em;text-transform:uppercase;}
+.xp-pts{font-size:12px;font-weight:600;color:#6E7F8A;letter-spacing:0.04em;}
 .xp-track{height:3px;background:rgba(35,181,211,0.12);border-radius:100px;overflow:hidden;}
-.xp-fill{height:100%;border-radius:100px;background:linear-gradient(90deg,#23B5D3,#75ABBC);transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
+.xp-fill{height:100%;border-radius:100px;background:linear-gradient(90deg,#2B5F7D,#6B8494);transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
 
 /* SCRIPTURE */
 .scripture-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.15);border-radius:14px;padding:18px;margin-bottom:12px;box-shadow:0 2px 12px rgba(7,16,19,0.05);}
-.scripture-verse{font-size:14px;font-weight:400;color:#2A4050;line-height:1.75;font-style:italic;}
-.scripture-ref{font-size:9px;font-weight:800;color:#23B5D3;margin-top:10px;letter-spacing:0.16em;text-transform:uppercase;}
+.scripture-verse{font-size:14px;font-weight:400;color:#2C3A44;line-height:1.75;font-style:italic;}
+.scripture-ref{font-size:9px;font-weight:800;color:#2B5F7D;margin-top:10px;letter-spacing:0.16em;text-transform:uppercase;}
 
 /* DATE STRIP */
 .date-strip{display:flex;gap:5px;overflow-x:auto;padding:4px 2px 8px;scrollbar-width:none;}
 .date-strip::-webkit-scrollbar{display:none;}
 .day-chip{display:flex;flex-direction:column;align-items:center;cursor:pointer;flex-shrink:0;width:42px;}
 .day-chip-inner{width:42px;height:58px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:1px solid rgba(35,181,211,0.15);transition:all 0.15s;background:rgba(255,255,255,0.7);}
-.day-chip-inner.today{border-color:#23B5D3;background:#EAF7FB;}
-.day-chip-inner.viewing{border-color:#75ABBC;background:#EAF2F6;}
-.day-chip-dow{font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:#7A9AAA;}
-.day-chip-num{font-size:16px;font-weight:800;color:#071013;line-height:1;}
-.day-chip-inner.today .day-chip-dow{color:#23B5D3;}
-.day-chip-inner.today .day-chip-num{color:#071013;}
-.day-chip-inner.viewing .day-chip-num{color:#23B5D3;}
+.day-chip-inner.today{border-color:#2B5F7D;background:#EDF1F3;}
+.day-chip-inner.viewing{border-color:#6B8494;background:#EAF2F6;}
+.day-chip-dow{font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:#6E7F8A;}
+.day-chip-num{font-size:16px;font-weight:800;color:#10171C;line-height:1;}
+.day-chip-inner.today .day-chip-dow{color:#2B5F7D;}
+.day-chip-inner.today .day-chip-num{color:#10171C;}
+.day-chip-inner.viewing .day-chip-num{color:#2B5F7D;}
 .day-dot{width:4px;height:4px;border-radius:50%;margin-top:1px;}
 
 /* SECTION HEADERS */
 .sec{margin:22px 0 10px;display:flex;align-items:center;justify-content:space-between;}
-.sec-title{font-size:11px;font-weight:800;color:#071013;letter-spacing:0.18em;text-transform:uppercase;}
-.sec-sub{font-size:11px;color:#7A9AAA;letter-spacing:0.04em;}
-.sec-btn{font-size:11px;font-weight:800;color:#23B5D3;background:none;border:none;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;}
+.sec-title{font-size:11px;font-weight:800;color:#10171C;letter-spacing:0.18em;text-transform:uppercase;}
+.sec-sub{font-size:11px;color:#6E7F8A;letter-spacing:0.04em;}
+.sec-btn{font-size:11px;font-weight:800;color:#2B5F7D;background:none;border:none;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;}
 
 /* CHECK CARD */
 .check-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;margin-bottom:12px;box-shadow:0 2px 12px rgba(7,16,19,0.06);}
@@ -485,64 +498,64 @@ button,input,textarea,select{font-family:inherit;}
 .c-icon-bg{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;background:rgba(35,181,211,0.08);transition:all 0.25s;}
 .c-icon-bg.done{background:rgba(35,181,211,0.15);}
 .c-icon-bg.done-travel{background:rgba(117,171,188,0.15);}
-.c-circle{width:24px;height:24px;border-radius:6px;border:2px solid #A2AEBB;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all 0.2s;background:#FFFFFF;}
-.c-circle.done{background:#23B5D3;border-color:#23B5D3;}
-.c-circle.done-travel{background:#75ABBC;border-color:#75ABBC;}
+.c-circle{width:24px;height:24px;border-radius:6px;border:2px solid #8B99A3;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all 0.2s;background:#FFFFFF;}
+.c-circle.done{background:#2B5F7D;border-color:#2B5F7D;}
+.c-circle.done-travel{background:#6B8494;border-color:#6B8494;}
 .c-circle.bounce{animation:bounceCheck 0.4s ease;}
 .c-circle.done::after,.c-circle.done-travel::after{content:"✓";color:#FFFFFF;font-size:13px;font-weight:900;}
 .c-body{flex:1;min-width:0;}
-.c-main{font-size:15px;font-weight:600;color:#071013;line-height:1.25;transition:color 0.2s;}
-.c-main.done{color:#A2AEBB;text-decoration:line-through;text-decoration-color:rgba(162,174,187,0.5);}
-.c-hint{font-size:12px;color:#7A9AAA;margin-top:2px;line-height:1.4;}
-.c-ts{font-size:9px;color:#A2AEBB;margin-top:3px;letter-spacing:0.06em;text-transform:uppercase;}
-.c-xp{font-size:12px;font-weight:800;color:#23B5D3;min-width:32px;text-align:right;}
-.c-xp.travel{color:#75ABBC;}
-.c-xp.done{color:#DFE0E2;}
+.c-main{font-size:15px;font-weight:600;color:#10171C;line-height:1.25;transition:color 0.2s;}
+.c-main.done{color:#8B99A3;text-decoration:line-through;text-decoration-color:rgba(162,174,187,0.5);}
+.c-hint{font-size:12px;color:#6E7F8A;margin-top:2px;line-height:1.4;}
+.c-ts{font-size:9px;color:#8B99A3;margin-top:3px;letter-spacing:0.06em;text-transform:uppercase;}
+.c-xp{font-size:12px;font-weight:800;color:#2B5F7D;min-width:32px;text-align:right;}
+.c-xp.travel{color:#6B8494;}
+.c-xp.done{color:#DCE2E6;}
 
 /* TRAVEL TOGGLE */
 .travel-toggle{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:none;cursor:pointer;font-size:11px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;transition:all 0.2s;}
-.travel-toggle.off{background:rgba(35,181,211,0.08);color:#4A7080;border:1px solid rgba(35,181,211,0.15);}
-.travel-toggle.on{background:#23B5D3;color:#FFFFFF;}
+.travel-toggle.off{background:rgba(35,181,211,0.08);color:#3E525E;border:1px solid rgba(35,181,211,0.15);}
+.travel-toggle.on{background:#2B5F7D;color:#FFFFFF;}
 
 /* MODALS */
 .modal-overlay{position:fixed;inset:0;background:rgba(7,16,19,0.6);z-index:200;display:flex;align-items:flex-end;}
-.modal-sheet{background:#F5FAFB;border-radius:20px 20px 0 0;padding:28px 22px calc(40px + env(safe-area-inset-bottom));width:100%;max-height:90vh;overflow-y:auto;border-top:1px solid rgba(35,181,211,0.15);}
-.modal-title{font-size:20px;font-weight:800;color:#071013;margin-bottom:6px;}
-.modal-sub{font-size:13px;color:#4A7080;margin-bottom:20px;}
-.modal-input{width:100%;background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.2);border-radius:10px;padding:14px 16px;font-size:16px;font-weight:500;color:#071013;outline:none;transition:all 0.2s;margin-bottom:12px;}
-.modal-input:focus{border-color:#23B5D3;box-shadow:0 0 0 3px rgba(35,181,211,0.1);}
-.modal-input::placeholder{color:#A2AEBB;}
-.modal-btn{width:100%;padding:16px;border:none;border-radius:10px;background:#23B5D3;color:#FFFFFF;font-size:14px;font-weight:800;cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;}
-.modal-cancel{width:100%;padding:12px;border:none;background:transparent;color:#7A9AAA;font-size:13px;cursor:pointer;margin-top:8px;}
+.modal-sheet{background:#F6F8F9;border-radius:20px 20px 0 0;padding:28px 22px calc(40px + env(safe-area-inset-bottom));width:100%;max-height:90vh;overflow-y:auto;border-top:1px solid rgba(35,181,211,0.15);}
+.modal-title{font-size:20px;font-weight:800;color:#10171C;margin-bottom:6px;}
+.modal-sub{font-size:13px;color:#3E525E;margin-bottom:20px;}
+.modal-input{width:100%;background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.2);border-radius:10px;padding:14px 16px;font-size:16px;font-weight:500;color:#10171C;outline:none;transition:all 0.2s;margin-bottom:12px;}
+.modal-input:focus{border-color:#2B5F7D;box-shadow:0 0 0 3px rgba(35,181,211,0.1);}
+.modal-input::placeholder{color:#8B99A3;}
+.modal-btn{width:100%;padding:16px;border:none;border-radius:10px;background:#2B5F7D;color:#FFFFFF;font-size:14px;font-weight:800;cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;}
+.modal-cancel{width:100%;padding:12px;border:none;background:transparent;color:#6E7F8A;font-size:13px;cursor:pointer;margin-top:8px;}
 
 /* EDITOR */
 .editor-overlay{position:fixed;inset:0;background:rgba(7,16,19,0.7);z-index:300;display:flex;flex-direction:column;}
-.editor-sheet{flex:1;background:#F5FAFB;overflow-y:auto;margin-top:env(safe-area-inset-top);}
+.editor-sheet{flex:1;background:#F6F8F9;overflow-y:auto;margin-top:env(safe-area-inset-top);}
 .editor-hdr{background:#FFFFFF;padding:16px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(35,181,211,0.12);position:sticky;top:0;z-index:10;}
-.editor-title{font-size:14px;font-weight:800;color:#071013;letter-spacing:0.12em;text-transform:uppercase;}
-.editor-close{background:#23B5D3;border:none;border-radius:8px;padding:8px 18px;color:#FFFFFF;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;}
+.editor-title{font-size:14px;font-weight:800;color:#10171C;letter-spacing:0.12em;text-transform:uppercase;}
+.editor-close{background:#2B5F7D;border:none;border-radius:8px;padding:8px 18px;color:#FFFFFF;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;}
 .editor-body{padding:16px;}
 .editor-item{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:10px;padding:12px 14px;margin-bottom:8px;box-shadow:0 1px 4px rgba(7,16,19,0.05);}
 .editor-item-row{display:flex;align-items:center;gap:10px;}
 .editor-icon-input{width:42px;height:42px;background:#F0F8FA;border:1px solid rgba(35,181,211,0.15);border-radius:8px;text-align:center;font-size:20px;cursor:pointer;flex-shrink:0;}
 .editor-text-inputs{flex:1;}
-.editor-field{width:100%;background:#F5FAFB;border:1px solid rgba(35,181,211,0.15);border-radius:6px;padding:7px 10px;font-size:13px;font-weight:600;color:#071013;outline:none;margin-bottom:5px;transition:all 0.2s;}
+.editor-field{width:100%;background:#F6F8F9;border:1px solid rgba(35,181,211,0.15);border-radius:6px;padding:7px 10px;font-size:13px;font-weight:600;color:#10171C;outline:none;margin-bottom:5px;transition:all 0.2s;}
 .editor-field:last-child{margin-bottom:0;}
-.editor-field:focus{border-color:#23B5D3;background:#FFFFFF;}
-.editor-field.small{font-size:12px;font-weight:400;color:#4A7080;}
-.editor-field::placeholder{color:#A2AEBB;}
-.editor-xp{width:52px;background:#EAF7FB;border:1px solid rgba(35,181,211,0.2);border-radius:6px;padding:6px 8px;font-size:12px;font-weight:800;color:#23B5D3;text-align:center;outline:none;}
-.editor-del{background:none;border:none;color:#A2AEBB;font-size:18px;cursor:pointer;padding:4px;flex-shrink:0;}
-.editor-add-btn{width:100%;padding:13px;background:transparent;border:1.5px dashed rgba(35,181,211,0.3);border-radius:10px;color:#23B5D3;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.12em;text-transform:uppercase;margin-top:4px;}
+.editor-field:focus{border-color:#2B5F7D;background:#FFFFFF;}
+.editor-field.small{font-size:12px;font-weight:400;color:#3E525E;}
+.editor-field::placeholder{color:#8B99A3;}
+.editor-xp{width:52px;background:#EDF1F3;border:1px solid rgba(35,181,211,0.2);border-radius:6px;padding:6px 8px;font-size:12px;font-weight:800;color:#2B5F7D;text-align:center;outline:none;}
+.editor-del{background:none;border:none;color:#8B99A3;font-size:18px;cursor:pointer;padding:4px;flex-shrink:0;}
+.editor-add-btn{width:100%;padding:13px;background:transparent;border:1.5px dashed rgba(35,181,211,0.3);border-radius:10px;color:#2B5F7D;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.12em;text-transform:uppercase;margin-top:4px;}
 
 /* HISTORY */
-.history-banner{background:#EAF7FB;border:1px solid rgba(35,181,211,0.2);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
-.history-banner-text{font-size:12px;font-weight:800;color:#0D6B85;letter-spacing:0.08em;text-transform:uppercase;}
-.history-banner-btn{font-size:11px;font-weight:800;color:#23B5D3;background:none;border:none;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;}
+.history-banner{background:#EDF1F3;border:1px solid rgba(35,181,211,0.2);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.history-banner-text{font-size:12px;font-weight:800;color:#17384A;letter-spacing:0.08em;text-transform:uppercase;}
+.history-banner-btn{font-size:11px;font-weight:800;color:#2B5F7D;background:none;border:none;cursor:pointer;letter-spacing:0.1em;text-transform:uppercase;}
 
 /* YEARMAP */
 .yearmap-overlay{position:fixed;inset:0;background:rgba(7,16,19,0.7);z-index:200;display:flex;align-items:flex-end;}
-.yearmap-sheet{background:#F5FAFB;border-radius:20px 20px 0 0;padding:24px 20px calc(40px + env(safe-area-inset-bottom));width:100%;max-height:85vh;overflow-y:auto;}
+.yearmap-sheet{background:#F6F8F9;border-radius:20px 20px 0 0;padding:24px 20px calc(40px + env(safe-area-inset-bottom));width:100%;max-height:85vh;overflow-y:auto;}
 .yearmap-cell{width:26px;height:26px;border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;}
 
 /* GOALS */
@@ -550,26 +563,26 @@ button,input,textarea,select{font-family:inherit;}
 .g-card.complete{opacity:0.45;}
 .g-hdr{display:flex;align-items:flex-start;gap:10px;margin-bottom:7px;}
 .g-dot{width:7px;height:7px;border-radius:2px;flex-shrink:0;margin-top:7px;}
-.g-title{font-size:15px;font-weight:700;color:#071013;line-height:1.3;flex:1;}
-.g-done{width:26px;height:26px;border-radius:6px;border:2px solid #A2AEBB;background:#FFFFFF;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#A2AEBB;font-size:11px;font-weight:800;transition:all 0.2s;flex-shrink:0;}
-.g-done.done{background:#23B5D3;border-color:#23B5D3;color:#FFFFFF;}
-.g-detail{font-size:12px;color:#4A7080;margin-bottom:9px;line-height:1.5;}
+.g-title{font-size:15px;font-weight:700;color:#10171C;line-height:1.3;flex:1;}
+.g-done{width:26px;height:26px;border-radius:6px;border:2px solid #8B99A3;background:#FFFFFF;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#8B99A3;font-size:11px;font-weight:800;transition:all 0.2s;flex-shrink:0;}
+.g-done.done{background:#2B5F7D;border-color:#2B5F7D;color:#FFFFFF;}
+.g-detail{font-size:12px;color:#3E525E;margin-bottom:9px;line-height:1.5;}
 .g-tag{display:inline-flex;font-size:9px;font-weight:800;padding:3px 9px;border-radius:4px;margin-bottom:12px;letter-spacing:0.1em;text-transform:uppercase;}
 .g-prog-row{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
 .g-prog-track{flex:1;height:3px;background:rgba(35,181,211,0.12);border-radius:100px;overflow:hidden;}
 .g-prog-fill{height:100%;border-radius:100px;transition:width 0.4s;}
-.g-prog-pct{font-size:13px;font-weight:800;color:#071013;width:36px;text-align:right;}
+.g-prog-pct{font-size:13px;font-weight:800;color:#10171C;width:36px;text-align:right;}
 .g-slider{width:100%;-webkit-appearance:none;height:3px;background:rgba(35,181,211,0.12);border-radius:100px;outline:none;cursor:pointer;margin-bottom:10px;}
-.g-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:6px;background:#23B5D3;cursor:pointer;box-shadow:0 2px 8px rgba(35,181,211,0.3);}
-.g-note{width:100%;background:#F5FAFB;border:1px solid rgba(35,181,211,0.15);border-radius:8px;padding:10px 12px;font-size:13px;color:#071013;outline:none;resize:none;transition:all 0.2s;line-height:1.5;}
-.g-note::placeholder{color:#A2AEBB;}
-.g-note:focus{border-color:#23B5D3;background:#FFFFFF;}
+.g-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:6px;background:#2B5F7D;cursor:pointer;box-shadow:0 2px 8px rgba(35,181,211,0.3);}
+.g-note{width:100%;background:#F6F8F9;border:1px solid rgba(35,181,211,0.15);border-radius:8px;padding:10px 12px;font-size:13px;color:#10171C;outline:none;resize:none;transition:all 0.2s;line-height:1.5;}
+.g-note::placeholder{color:#8B99A3;}
+.g-note:focus{border-color:#2B5F7D;background:#FFFFFF;}
 
 /* DOMAIN GRID */
 .d-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;}
 .d-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;padding:16px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .d-icon{font-size:20px;margin-bottom:8px;}
-.d-lbl{font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:0.14em;color:#7A9AAA;margin-bottom:6px;}
+.d-lbl{font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:0.14em;color:#6E7F8A;margin-bottom:6px;}
 .d-pct{font-size:32px;font-weight:900;letter-spacing:-0.03em;line-height:1;margin-bottom:8px;}
 .d-bar{height:3px;background:rgba(35,181,211,0.1);border-radius:100px;overflow:hidden;}
 .d-fill{height:100%;border-radius:100px;transition:width 0.8s;}
@@ -578,52 +591,52 @@ button,input,textarea,select{font-family:inherit;}
 .stat-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(7,16,19,0.05);margin-bottom:12px;}
 .s-row{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(35,181,211,0.07);}
 .s-row:last-child{border-bottom:none;}
-.s-lbl{font-size:14px;color:#071013;}
-.s-val{font-size:14px;font-weight:800;color:#23B5D3;}
+.s-lbl{font-size:14px;color:#10171C;}
+.s-val{font-size:14px;font-weight:800;color:#2B5F7D;}
 
 /* ACHIEVEMENTS */
 .ach-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:12px;}
 .ach-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.1);border-radius:10px;padding:10px 4px;display:flex;flex-direction:column;align-items:center;gap:5px;opacity:0.25;transition:all 0.3s;box-shadow:0 1px 4px rgba(7,16,19,0.04);}
-.ach-card.unlocked{opacity:1;border-color:rgba(35,181,211,0.3);background:#EAF7FB;}
+.ach-card.unlocked{opacity:1;border-color:rgba(35,181,211,0.3);background:#EDF1F3;}
 .ach-icon{font-size:22px;line-height:1;}
-.ach-name{font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:#7A9AAA;text-align:center;line-height:1.3;}
+.ach-name{font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:#6E7F8A;text-align:center;line-height:1.3;}
 
 /* CHIPS */
 .chips{display:flex;gap:6px;margin-bottom:13px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;}
 .chips::-webkit-scrollbar{display:none;}
-.chip{padding:7px 14px;border-radius:6px;border:1px solid rgba(35,181,211,0.2);background:#FFFFFF;color:#4A7080;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;transition:all 0.2s;letter-spacing:0.08em;text-transform:uppercase;}
+.chip{padding:7px 14px;border-radius:6px;border:1px solid rgba(35,181,211,0.2);background:#FFFFFF;color:#3E525E;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;transition:all 0.2s;letter-spacing:0.08em;text-transform:uppercase;}
 .chip.active{border-color:var(--cc);color:var(--cc);background:rgba(35,181,211,0.06);}
 
 /* MUSIC */
-.music-hero{background:linear-gradient(145deg,#071013,#0D2030,#0F2D3A);border-radius:18px;padding:22px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(7,16,19,0.2);}
+.music-hero{background:linear-gradient(145deg,#10171C,#121C24,#14262F);border-radius:18px;padding:22px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(7,16,19,0.2);}
 .music-hero::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent);}
 .album-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .album-bar{height:4px;background:rgba(35,181,211,0.1);border-radius:100px;overflow:hidden;margin-bottom:8px;}
-.album-fill{height:100%;background:linear-gradient(90deg,#23B5D3,#75ABBC);border-radius:100px;transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
+.album-fill{height:100%;background:linear-gradient(90deg,#2B5F7D,#6B8494);border-radius:100px;transition:width 0.8s cubic-bezier(0.4,0,0.2,1);}
 .prac-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;}
 .prac-card{background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.15);border-radius:12px;padding:16px 10px;text-align:center;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 8px rgba(7,16,19,0.05);}
-.prac-card.logged{background:#EAF7FB;border-color:#23B5D3;}
+.prac-card.logged{background:#EDF1F3;border-color:#2B5F7D;}
 .prac-card:active{transform:scale(0.97);}
 .track-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(7,16,19,0.05);margin-bottom:8px;}
-.track-card.priority{border-left:3px solid #23B5D3;}
+.track-card.priority{border-left:3px solid #2B5F7D;}
 .track-hdr{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
-.track-title{font-size:14px;font-weight:700;color:#071013;flex:1;cursor:pointer;}
-.stage-sel{-webkit-appearance:none;background:#EAF7FB;border:1px solid rgba(35,181,211,0.2);border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;color:#0D6B85;cursor:pointer;outline:none;}
+.track-title{font-size:14px;font-weight:700;color:#10171C;flex:1;cursor:pointer;}
+.stage-sel{-webkit-appearance:none;background:#EDF1F3;border:1px solid rgba(35,181,211,0.2);border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;color:#17384A;cursor:pointer;outline:none;}
 .stage-sel.complete{background:#E8F5E9;border-color:rgba(56,142,60,0.3);color:#2E7D32;}
 .track-bar{height:2px;background:rgba(35,181,211,0.1);overflow:hidden;margin-bottom:8px;border-radius:100px;}
-.track-fill{height:100%;background:linear-gradient(90deg,#23B5D3,#75ABBC);border-radius:100px;transition:width 0.5s;}
-.track-note{width:100%;background:#F5FAFB;border:none;border-radius:6px;padding:8px 10px;font-size:12px;color:#4A7080;outline:none;resize:none;line-height:1.4;}
+.track-fill{height:100%;background:linear-gradient(90deg,#2B5F7D,#6B8494);border-radius:100px;transition:width 0.5s;}
+.track-note{width:100%;background:#F6F8F9;border:none;border-radius:6px;padding:8px 10px;font-size:12px;color:#3E525E;outline:none;resize:none;line-height:1.4;}
 .track-note:focus{outline:1px solid rgba(35,181,211,0.3);background:#FFFFFF;}
 
 /* JOURNAL */
-.journal-input{width:100%;background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.15);border-radius:14px;padding:16px 18px;font-size:15px;color:#071013;outline:none;resize:none;transition:all 0.2s;line-height:1.7;box-shadow:0 2px 8px rgba(7,16,19,0.04);}
-.journal-input::placeholder{color:#A2AEBB;line-height:1.7;}
-.journal-input:focus{border-color:#23B5D3;box-shadow:0 0 0 3px rgba(35,181,211,0.1);}
+.journal-input{width:100%;background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.15);border-radius:14px;padding:16px 18px;font-size:15px;color:#10171C;outline:none;resize:none;transition:all 0.2s;line-height:1.7;box-shadow:0 2px 8px rgba(7,16,19,0.04);}
+.journal-input::placeholder{color:#8B99A3;line-height:1.7;}
+.journal-input:focus{border-color:#2B5F7D;box-shadow:0 0 0 3px rgba(35,181,211,0.1);}
 .jcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
-.jcal-cell{aspect-ratio:1;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px;font-weight:600;transition:all 0.15s;color:#4A7080;background:rgba(255,255,255,0.7);}
+.jcal-cell{aspect-ratio:1;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px;font-weight:600;transition:all 0.15s;color:#3E525E;background:rgba(255,255,255,0.7);}
 .jcal-cell.empty{visibility:hidden;}
-.jcal-cell.has-entry{background:#23B5D3;color:#FFFFFF;font-weight:800;}
-.jcal-cell.today-cell{border:2px solid #23B5D3;color:#071013;font-weight:800;background:#FFFFFF;}
+.jcal-cell.has-entry{background:#2B5F7D;color:#FFFFFF;font-weight:800;}
+.jcal-cell.today-cell{border:2px solid #2B5F7D;color:#10171C;font-weight:800;background:#FFFFFF;}
 .jcal-cell.today-cell.has-entry{border:none;}
 .jcal-cell.future{opacity:0.25;cursor:default;}
 .jcal-cell:not(.has-entry):not(.future):not(.empty):hover{background:rgba(35,181,211,0.1);}
@@ -632,12 +645,12 @@ button,input,textarea,select{font-family:inherit;}
 .plan-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .plan-priority-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-bottom:1px solid rgba(35,181,211,0.07);}
 .plan-priority-row:last-child{border-bottom:none;}
-.plan-num{width:26px;height:26px;border-radius:6px;background:#23B5D3;display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:12px;font-weight:900;flex-shrink:0;}
-.plan-input{flex:1;border:none;outline:none;font-size:15px;font-weight:500;color:#071013;background:transparent;}
-.plan-input::placeholder{color:#A2AEBB;}
+.plan-num{width:26px;height:26px;border-radius:6px;background:#2B5F7D;display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:12px;font-weight:900;flex-shrink:0;}
+.plan-input{flex:1;border:none;outline:none;font-size:15px;font-weight:500;color:#10171C;background:transparent;}
+.plan-input::placeholder{color:#8B99A3;}
 
 /* PLATFORM */
-.platform-hero{background:linear-gradient(145deg,#071013,#0D1520,#101828,#0A1535);border-radius:18px;padding:22px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(7,16,19,0.2);}
+.platform-hero{background:linear-gradient(145deg,#10171C,#0D1520,#101828,#0A1535);border-radius:18px;padding:22px;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(7,16,19,0.2);}
 .platform-hero::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent);}
 
 /* FINANCIAL */
@@ -649,60 +662,60 @@ button,input,textarea,select{font-family:inherit;}
 .friend-list{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;margin-bottom:12px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .friend-row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid rgba(35,181,211,0.07);}
 .friend-row:last-child{border-bottom:none;}
-.friend-av{width:36px;height:36px;border-radius:8px;background:#23B5D3;display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:14px;font-weight:800;flex-shrink:0;}
+.friend-av{width:36px;height:36px;border-radius:8px;background:#2B5F7D;display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:14px;font-weight:800;flex-shrink:0;}
 
 /* VISION */
 .vision-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;padding:18px;box-shadow:0 2px 10px rgba(7,16,19,0.05);margin-bottom:10px;}
-.quote-hero{background:linear-gradient(145deg,#071013,#0D2030,#0F2D3A);border-radius:18px;padding:24px;margin-bottom:12px;position:relative;box-shadow:0 8px 32px rgba(7,16,19,0.2);}
+.quote-hero{background:linear-gradient(145deg,#10171C,#121C24,#14262F);border-radius:18px;padding:24px;margin-bottom:12px;position:relative;box-shadow:0 8px 32px rgba(7,16,19,0.2);}
 .quote-hero::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent);}
 
 /* TENET */
 .tenet-row{display:flex;align-items:flex-start;gap:13px;padding:12px 0;border-bottom:1px solid rgba(35,181,211,0.08);}
 .tenet-row:last-child{border-bottom:none;}
-.tenet-s{font-size:18px;font-weight:900;color:#23B5D3;width:22px;flex-shrink:0;line-height:1.2;}
+.tenet-s{font-size:18px;font-weight:900;color:#2B5F7D;width:22px;flex-shrink:0;line-height:1.2;}
 
 /* TODO */
 .todo-input-row{display:flex;gap:8px;margin-bottom:10px;}
-.todo-input{flex:1;background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.15);border-radius:10px;padding:12px 14px;font-size:15px;color:#071013;outline:none;transition:all 0.2s;box-shadow:0 2px 6px rgba(7,16,19,0.04);}
-.todo-input::placeholder{color:#A2AEBB;}
-.todo-input:focus{border-color:#23B5D3;}
-.todo-add-btn{width:46px;height:46px;border-radius:10px;background:#23B5D3;border:none;color:#FFFFFF;font-size:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:300;box-shadow:0 4px 12px rgba(35,181,211,0.3);}
-.todo-circle{width:22px;height:22px;border-radius:6px;border:2px solid #A2AEBB;flex-shrink:0;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;background:#FFFFFF;}
-.todo-circle.done{background:#23B5D3;border-color:#23B5D3;}
+.todo-input{flex:1;background:#FFFFFF;border:1.5px solid rgba(35,181,211,0.15);border-radius:10px;padding:12px 14px;font-size:15px;color:#10171C;outline:none;transition:all 0.2s;box-shadow:0 2px 6px rgba(7,16,19,0.04);}
+.todo-input::placeholder{color:#8B99A3;}
+.todo-input:focus{border-color:#2B5F7D;}
+.todo-add-btn{width:46px;height:46px;border-radius:10px;background:#2B5F7D;border:none;color:#FFFFFF;font-size:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:300;box-shadow:0 4px 12px rgba(35,181,211,0.3);}
+.todo-circle{width:22px;height:22px;border-radius:6px;border:2px solid #8B99A3;flex-shrink:0;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;background:#FFFFFF;}
+.todo-circle.done{background:#2B5F7D;border-color:#2B5F7D;}
 .todo-circle.done::after{content:"✓";color:#FFFFFF;font-size:11px;font-weight:900;}
-.todo-del{background:none;border:none;color:#A2AEBB;font-size:18px;cursor:pointer;padding:4px;}
+.todo-del{background:none;border:none;color:#8B99A3;font-size:18px;cursor:pointer;padding:4px;}
 
 /* FORMS */
 .add-form{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
-.field{width:100%;background:#F5FAFB;border:1.5px solid rgba(35,181,211,0.15);border-radius:10px;padding:12px 14px;font-size:15px;color:#071013;outline:none;margin-bottom:8px;transition:all 0.2s;}
-.field::placeholder{color:#A2AEBB;}
-.field:focus{border-color:#23B5D3;background:#FFFFFF;box-shadow:0 0 0 3px rgba(35,181,211,0.08);}
+.field{width:100%;background:#F6F8F9;border:1.5px solid rgba(35,181,211,0.15);border-radius:10px;padding:12px 14px;font-size:15px;color:#10171C;outline:none;margin-bottom:8px;transition:all 0.2s;}
+.field::placeholder{color:#8B99A3;}
+.field:focus{border-color:#2B5F7D;background:#FFFFFF;box-shadow:0 0 0 3px rgba(35,181,211,0.08);}
 select.field{-webkit-appearance:none;cursor:pointer;}
 .btn-row{display:flex;gap:8px;}
-.btn-p{flex:1;padding:13px;background:#23B5D3;border:none;border-radius:8px;color:#FFFFFF;font-size:13px;font-weight:800;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;box-shadow:0 4px 12px rgba(35,181,211,0.25);}
-.btn-s{flex:1;padding:13px;background:#F5FAFB;border:1px solid rgba(35,181,211,0.15);border-radius:8px;color:#4A7080;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.04em;}
+.btn-p{flex:1;padding:13px;background:#2B5F7D;border:none;border-radius:8px;color:#FFFFFF;font-size:13px;font-weight:800;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;box-shadow:0 4px 12px rgba(35,181,211,0.25);}
+.btn-s{flex:1;padding:13px;background:#F6F8F9;border:1px solid rgba(35,181,211,0.15);border-radius:8px;color:#3E525E;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.04em;}
 
 /* BOTTOM NAV */
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:rgba(245,250,251,0.92);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);border-top:1px solid rgba(35,181,211,0.15);display:flex;z-index:50;padding:8px 0 calc(8px + env(safe-area-inset-bottom));box-shadow:0 -4px 20px rgba(7,16,19,0.08);}
-.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 1px;cursor:pointer;border:none;background:transparent;color:#A2AEBB;transition:color 0.2s;}
-.nav-btn.active{color:#23B5D3;}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 1px;cursor:pointer;border:none;background:transparent;color:#8B99A3;transition:color 0.2s;}
+.nav-btn.active{color:#2B5F7D;}
 .nav-icon{width:22px;height:22px;display:flex;align-items:center;justify-content:center;}
 .nav-lbl{font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;}
 
 /* TOAST */
-.toast{position:fixed;top:calc(80px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:#071013;border:1px solid rgba(35,181,211,0.3);border-radius:8px;padding:10px 20px;font-size:12px;font-weight:800;color:#23B5D3;z-index:300;white-space:nowrap;letter-spacing:0.08em;text-transform:uppercase;animation:fadeUp 0.3s ease;box-shadow:0 4px 20px rgba(7,16,19,0.3);}
+.toast{position:fixed;top:calc(80px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:#10171C;border:1px solid rgba(35,181,211,0.3);border-radius:8px;padding:10px 20px;font-size:12px;font-weight:800;color:#2B5F7D;z-index:300;white-space:nowrap;letter-spacing:0.08em;text-transform:uppercase;animation:fadeUp 0.3s ease;box-shadow:0 4px 20px rgba(7,16,19,0.3);}
 
 /* FOOTER */
 .col323-footer{text-align:center;padding:20px 20px 8px;}
-.col323-verse{font-size:11px;font-style:italic;color:#7A9AAA;line-height:1.7;}
-.col323-ref{font-size:9px;font-weight:800;color:#23B5D3;letter-spacing:0.14em;text-transform:uppercase;margin-top:5px;}
+.col323-verse{font-size:11px;font-style:italic;color:#6E7F8A;line-height:1.7;}
+.col323-ref{font-size:9px;font-weight:800;color:#2B5F7D;letter-spacing:0.14em;text-transform:uppercase;margin-top:5px;}
 
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;background:#071013;}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;background:#10171C;}
 .scroll{flex:1;overflow-y:auto;padding:14px 15px 110px;}
 .r-tabs{display:flex;background:rgba(255,255,255,0.8);border:1px solid rgba(35,181,211,0.15);border-radius:10px;padding:4px;gap:3px;margin-bottom:14px;}
-.r-tab{flex:1;padding:9px 4px;border:none;background:transparent;border-radius:7px;font-size:10px;font-weight:800;color:#7A9AAA;cursor:pointer;transition:all 0.2s;letter-spacing:0.1em;text-transform:uppercase;}
-.r-tab.active{background:#23B5D3;color:#FFFFFF;box-shadow:0 2px 8px rgba(35,181,211,0.25);}
-.prompt-card{background:#EAF7FB;border:1px solid rgba(35,181,211,0.2);border-radius:12px;padding:13px 15px;margin-bottom:12px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all 0.15s;}
+.r-tab{flex:1;padding:9px 4px;border:none;background:transparent;border-radius:7px;font-size:10px;font-weight:800;color:#6E7F8A;cursor:pointer;transition:all 0.2s;letter-spacing:0.1em;text-transform:uppercase;}
+.r-tab.active{background:#2B5F7D;color:#FFFFFF;box-shadow:0 2px 8px rgba(35,181,211,0.25);}
+.prompt-card{background:#EDF1F3;border:1px solid rgba(35,181,211,0.2);border-radius:12px;padding:13px 15px;margin-bottom:12px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all 0.15s;}
 .prompt-card:active{transform:scale(0.99);}
 .trip-card{background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;overflow:hidden;margin-bottom:12px;box-shadow:0 2px 10px rgba(7,16,19,0.05);}
 .trip-row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid rgba(35,181,211,0.07);}
@@ -710,24 +723,24 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 /* CATEGORIES */
 .cat-pills{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;scrollbar-width:none;}
 .cat-pills::-webkit-scrollbar{display:none;}
-.cat-pill{display:flex;align-items:center;gap:5px;padding:7px 13px;border-radius:100px;border:1.5px solid rgba(35,181,211,0.2);background:#FFFFFF;color:#4A7080;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all 0.15s;flex-shrink:0;}
-.cat-pill.active{border-color:#23B5D3;background:#EAF7FB;color:#071013;}
-.cat-pill-count{background:#23B5D3;color:#FFFFFF;font-size:9px;font-weight:800;border-radius:100px;padding:1px 6px;min-width:16px;text-align:center;}
+.cat-pill{display:flex;align-items:center;gap:5px;padding:7px 13px;border-radius:100px;border:1.5px solid rgba(35,181,211,0.2);background:#FFFFFF;color:#3E525E;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all 0.15s;flex-shrink:0;}
+.cat-pill.active{border-color:#2B5F7D;background:#EDF1F3;color:#10171C;}
+.cat-pill-count{background:#2B5F7D;color:#FFFFFF;font-size:9px;font-weight:800;border-radius:100px;padding:1px 6px;min-width:16px;text-align:center;}
 .cat-add-form{display:flex;gap:8px;margin-bottom:10px;align-items:center;}
-.cat-name-input{flex:1;background:#FFFFFF;border:1.5px solid #23B5D3;border-radius:10px;padding:10px 14px;font-size:14px;color:#071013;outline:none;}
-.cat-name-input::placeholder{color:#A2AEBB;}
-.cat-add-confirm{padding:10px 16px;background:#23B5D3;border:none;border-radius:8px;color:#FFFFFF;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;letter-spacing:0.06em;text-transform:uppercase;}
-.cat-add-cancel{padding:10px;background:none;border:none;color:#A2AEBB;font-size:16px;cursor:pointer;}
+.cat-name-input{flex:1;background:#FFFFFF;border:1.5px solid #2B5F7D;border-radius:10px;padding:10px 14px;font-size:14px;color:#10171C;outline:none;}
+.cat-name-input::placeholder{color:#8B99A3;}
+.cat-add-confirm{padding:10px 16px;background:#2B5F7D;border:none;border-radius:8px;color:#FFFFFF;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;letter-spacing:0.06em;text-transform:uppercase;}
+.cat-add-cancel{padding:10px;background:none;border:none;color:#8B99A3;font-size:16px;cursor:pointer;}
 .cat-section{margin-bottom:4px;}
 .cat-header{display:flex;align-items:center;gap:8px;padding:11px 16px;background:#FFFFFF;border:1px solid rgba(35,181,211,0.12);border-radius:14px;cursor:pointer;transition:all 0.15s;box-shadow:0 1px 4px rgba(7,16,19,0.04);}
 .cat-section:has(.check-card) .cat-header{border-radius:14px 14px 0 0;border-bottom:none;}
-.cat-header:active{background:#F5FAFB;}
+.cat-header:active{background:#F6F8F9;}
 .cat-chevron{flex-shrink:0;transition:transform 0.2s ease;display:flex;align-items:center;}
-.cat-header-name{font-size:13px;font-weight:700;color:#071013;letter-spacing:0.02em;}
-.cat-rename-input{flex:1;border:none;border-bottom:2px solid #23B5D3;background:transparent;font-size:13px;font-weight:700;color:#071013;outline:none;padding-bottom:2px;}
-.cat-collapsed-badge{font-size:10px;font-weight:700;color:#7A9AAA;background:rgba(35,181,211,0.08);padding:3px 8px;border-radius:100px;white-space:nowrap;}
-.cat-clear-btn{font-size:10px;font-weight:800;color:#A2AEBB;background:none;border:none;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;}
-.cat-del-btn{font-size:14px;color:#A2AEBB;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;}
+.cat-header-name{font-size:13px;font-weight:700;color:#10171C;letter-spacing:0.02em;}
+.cat-rename-input{flex:1;border:none;border-bottom:2px solid #2B5F7D;background:transparent;font-size:13px;font-weight:700;color:#10171C;outline:none;padding-bottom:2px;}
+.cat-collapsed-badge{font-size:10px;font-weight:700;color:#6E7F8A;background:rgba(35,181,211,0.08);padding:3px 8px;border-radius:100px;white-space:nowrap;}
+.cat-clear-btn{font-size:10px;font-weight:800;color:#8B99A3;background:none;border:none;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;}
+.cat-del-btn{font-size:14px;color:#8B99A3;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;}
 .cat-del-btn:hover{color:#EF4444;}
 
 `;
@@ -826,10 +839,19 @@ export default function App() {
   // Quick Capture — lingering notes on the main screen
   const [quickNotes, setQuickNotes] = useState([]); // [{id,text,kind,at}]
   const [quickInput, setQuickInput] = useState("");
-  // Keystone — today's one thing (auto-suggested, overridable)
+  // Keystone — today's one thing, drawn from the strategic library
   const [keystoneOverrideId, setKeystoneOverrideId] = useState(null);
   const [keystoneWhy, setKeystoneWhy] = useState({}); // {taskId: "why it matters" text}
   const [keystoneMin, setKeystoneMin] = useState({}); // {taskId: "minimum version" text}
+  const [keystoneSkip, setKeystoneSkip] = useState(0);      // "show another" offset
+  const [recentKeystones, setRecentKeystones] = useState([]); // cooldown: last 20 ids
+  const [keystoneDoneMap, setKeystoneDoneMap] = useState({}); // {dateStr: keystoneId}
+  // Larger Arc — checklists, not percentages
+  const [arcs, setArcs] = useState(DEFAULT_ARCS);
+  const [arcOffset, setArcOffset] = useState(0);
+  const [showMomentumInfo, setShowMomentumInfo] = useState(false);
+  const [showReview, setShowReview] = useState(false);
+  const [arcsSnapshot, setArcsSnapshot] = useState(null); // last week's arc state, for movement detection
   // Journal prompt of the day
   const [journalPromptSeed] = useState(()=>Math.floor(Math.random()*10000));
   const [avatar,      setAvatar]      = useState(null);   // base64 data URL
@@ -884,6 +906,42 @@ export default function App() {
         if(s)   setStreaks(s);      if(ach) setUnlockedAch(ach);
         if(tl)  setTripLog(tl);    if(tm)  setTravelMode(tm);
         if(dest)setTravelDest(dest);
+
+        // Keystone rotation state + arcs (checklist-based Larger Arc).
+        const kRecent = await load("wb-keystone-recent");
+        const kDone   = await load("wb-keystone-done");
+        const savedArcs = await load("wb-arcs-v1");
+        if(kRecent) setRecentKeystones(kRecent);
+        if(kDone)   setKeystoneDoneMap(kDone);
+        // Arc snapshot: stored once per week so the review can tell whether any
+        // long-horizon step actually moved, rather than just how many are done.
+        const snapMeta = await load("wb-arcs-snapshot");
+        if(snapMeta){
+          setArcsSnapshot(snapMeta.arcs||null);
+          if(snapMeta.week!==weekKey()){
+            const cur = (await load("wb-arcs-v1")) || DEFAULT_ARCS;
+            await save("wb-arcs-snapshot",{week:weekKey(),arcs:cur});
+            setArcsSnapshot(snapMeta.arcs||cur);
+          }
+        } else {
+          const cur = (await load("wb-arcs-v1")) || DEFAULT_ARCS;
+          await save("wb-arcs-snapshot",{week:weekKey(),arcs:cur});
+          setArcsSnapshot(cur);
+        }
+        if(savedArcs && Array.isArray(savedArcs) && savedArcs.length){
+          // Merge: keep saved step-completion, but pick up any newly shipped arcs.
+          const merged = DEFAULT_ARCS.map(def=>{
+            const prev = savedArcs.find(a=>a.id===def.id);
+            if(!prev) return def;
+            return {...def, completed: prev.completed,
+              steps:(def.steps||[]).map(s=>{
+                const ps=(prev.steps||[]).find(x=>x.id===s.id);
+                return ps?{...s,done:!!ps.done}:s;
+              })};
+          });
+          const custom = savedArcs.filter(a=>!DEFAULT_ARCS.some(d=>d.id===a.id));
+          setArcs([...merged,...custom]);
+        }
         // If travel mode was active, also load the travel checklist for today
         if(tm) {
           const travelKey = getDayKey(today, "travel");
@@ -894,6 +952,14 @@ export default function App() {
         if(wp)  setWeekPlan(wp);   if(pa)  setPlanArchive(pa);
         if(tod) setTodos(tod);     if(cl)  setCustomLists(cl);
         if(hist)setHistory(hist);
+        // History is stored per calendar year. A 120-day momentum window
+        // crosses Jan 1, so without last year's slice every January would
+        // look like a cold start. Merge the previous year in behind it.
+        try{
+          const prevYear = new Date().getFullYear()-1;
+          const prevHist = await load(`wb-history-${prevYear}`);
+          if(prevHist) setHistory(p=>({...prevHist,...(hist||{}),...p}));
+        }catch(e){ /* first year of use — nothing to merge */ }
         const av = await load("wb-avatar"); if(av) setAvatar(av);
         const cats = await load("wb-categories-v1");
         const proteinData = await load(`wb-protein-${todayKey()}`); if(proteinData) setProteinLog(proteinData);
@@ -944,16 +1010,29 @@ export default function App() {
   const healthCoreItems = coreItems.filter(i=>i.cat==="health");
   const healthCoreDone  = (state)=>healthCoreItems.length===0||healthCoreItems.every(i=>state[i.id]?.checked);
 
-  // ── KEYSTONE (Phase 1, hybrid: auto-suggest + manual override) ──────
-  // Auto-picks the first unchecked core item as today's one thing; a
-  // person can override by tapping "Choose a different keystone" on any
-  // other core item. Falls back to the first core item once everything's
-  // done, so the card never goes empty.
-  const keystoneItem = (keystoneOverrideId && coreItems.find(i=>i.id===keystoneOverrideId))
-    || coreItems.find(i=>!todayState[i.id]?.checked)
-    || coreItems[0]
-    || null;
-  const maintenanceItems = coreItems.filter(i=>i.id!==keystoneItem?.id);
+  // ── KEYSTONE ────────────────────────────────────────────────────────
+  // Drawn from KEYSTONE_LIBRARY (60+ strategic prompts across faith, family,
+  // health, platform, money, leadership, identity) rather than from today's
+  // checklist. The checklist already has its own card — echoing it here made
+  // the keystone a duplicate instead of the one thing that moves life forward.
+  //
+  // Sabbath deliberately gets NO keystone. A rest day with an assignment on it
+  // isn't a rest day. Sunday renders an invitation instead (see render below).
+  const dayOfYearNow = Math.floor((new Date()-new Date(new Date().getFullYear(),0,0))/864e5);
+  const keystoneMode = todayMode === "travel" ? "travel" : getModeForDate(today);
+  const isSabbathToday = keystoneMode === "sunday";
+
+  const libraryKeystone = isSabbathToday ? null : pickKeystone({
+    mode: keystoneMode,
+    dayOfYear: dayOfYearNow + keystoneSkip,
+    recentIds: recentKeystones,
+  });
+  // Manual override still supported: tapping "show me another" advances the
+  // rotation rather than falling back to a checklist item.
+  const keystoneItem = libraryKeystone;
+  const sabbathInvitation = isSabbathToday ? pickSabbathInvitation(dayOfYearNow) : null;
+  const keystoneDone = keystoneItem ? !!keystoneDoneMap[today] : false;
+  const maintenanceItems = coreItems;
   const bonusItems = todayItems.filter(i=>i.w==="bonus");
   const maintDoneCount = maintenanceItems.filter(i=>todayState[i.id]?.checked).length;
 
@@ -971,6 +1050,56 @@ export default function App() {
   const dayOfYear = Math.floor((new Date()-new Date(new Date().getFullYear(),0,0))/864e5);
   const openGoals = goals.filter(g=>!g.completed);
   const surfacedGoal = openGoals.length>0 ? openGoals[dayOfYear%openGoals.length] : null;
+
+  // Larger Arc: rotate through arcs that still have unchecked steps.
+  const surfacedArc = pickArc(arcs, dayOfYear, arcOffset);
+  const surfacedArcDone = surfacedArc ? (surfacedArc.steps||[]).filter(s=>s.done).length : 0;
+  const surfacedArcNext = surfacedArc ? nextStep(surfacedArc) : null;
+
+  // ── CONSISTENCY-BASED MOMENTUM (replaces the brittle all-or-nothing streak) ──
+  // The old streak required every core item; one thin day reset it to zero,
+  // which is demoralising and easy to abandon. A day now COUNTS if any of:
+  //   · the keystone was done
+  //   · at least half the core checklist was done
+  //   · it was a Sabbath / declared rest day (rest is participation, not failure)
+  // Tiers are tracked so a strong day still reads differently from a thin one.
+  const dayTier=(ds)=>{
+    const h = history[ds];
+    const mode = getModeForDate(ds);
+    if(mode==="sunday") return "rest";
+    if(keystoneDoneMap[ds]) return "full";
+    if(!h||!h.maxPts) return null;
+    const pct = h.pct||0;
+    if(pct>=80) return "full";
+    if(pct>=40) return "partial";
+    return null;
+  };
+  // Weekly review — reads the last seven days back and says something about it.
+  const weeklyReview = buildWeeklyReview({
+    history: history||{},
+    keystoneDone: keystoneDoneMap,
+    arcs,
+    journalEntries: journal||{},
+    prevArcsSnapshot: arcsSnapshot,
+    today,
+  });
+
+  const momentum = (()=>{
+    let current=0, best=0, run=0, active30=0, fullDays=0;
+    const window = getPastDays(120);
+    window.forEach(ds=>{
+      const t = dayTier(ds);
+      if(t){ run++; best=Math.max(best,run); } else { run=0; }
+    });
+    // current run counts backwards from today
+    const back = getPastDays(120).slice().reverse();
+    for(const ds of back){
+      const t = dayTier(ds);
+      if(t){ current++; } else if(ds!==today){ break; } else { break; }
+    }
+    getPastDays(30).forEach(ds=>{ const t=dayTier(ds); if(t){active30++; if(t==="full")fullDays++;} });
+    return {current,best:Math.max(best,current),active30,fullDays};
+  })();
 
 
   const todayPts  = todayItems.reduce((s,i)=>s+(todayState[i.id]?.checked?i.xp:0),0);
@@ -1254,6 +1383,48 @@ export default function App() {
   };
 
   // ── GOALS ────────────────────────────────────────────────────────────
+  // ── KEYSTONE handlers ───────────────────────────────────────────────
+  const completeKeystone=async()=>{
+    if(!keystoneItem) return;
+    const already = !!keystoneDoneMap[today];
+    const nextMap = {...keystoneDoneMap};
+    if(already){ delete nextMap[today]; }
+    else { nextMap[today] = keystoneItem.id; }
+    setKeystoneDoneMap(nextMap);
+    await save("wb-keystone-done", nextMap);
+    if(!already){
+      const nextRecent = [keystoneItem.id, ...recentKeystones].slice(0,20);
+      setRecentKeystones(nextRecent);
+      await save("wb-keystone-recent", nextRecent);
+      const nxp = totalXP + 40;
+      setTotalXP(nxp); await save("wb-totalxp", nxp);
+      showToast("✦ Keystone done. +40 pts");
+    }
+  };
+  const skipKeystone=()=>setKeystoneSkip(s=>s+1);
+
+  // ── ARC handlers — the Larger Arc as an advanceable checklist ────────
+  const toggleArcStep=async(arcId,stepId)=>{
+    const u = arcs.map(a=>a.id!==arcId?a:{
+      ...a, steps:(a.steps||[]).map(s=>s.id===stepId?{...s,done:!s.done}:s)
+    });
+    setArcs(u); await save("wb-arcs-v1", u);
+    const arc = u.find(a=>a.id===arcId);
+    const step = (arc?.steps||[]).find(s=>s.id===stepId);
+    if(step?.done){
+      const nxp = totalXP + 25;
+      setTotalXP(nxp); await save("wb-totalxp", nxp);
+      if(isArcComplete(arc)){
+        const bonus = nxp + 150;
+        setTotalXP(bonus); await save("wb-totalxp", bonus);
+        showToast(`🎯 "${arc.title}" complete! +175 pts`);
+      } else {
+        showToast("Step forward. +25 pts");
+      }
+    }
+  };
+  const cycleArc=()=>setArcOffset(o=>o+1);
+
   const toggleGoalDone=async(id)=>{const g=goals.find(x=>x.id===id);const u=goals.map(x=>x.id===id?{...x,completed:!x.completed,progress:!x.completed?100:x.progress}:x);setGoals(u);await save("wb-goals-v5",u);if(!g.completed){const nxp=totalXP+100;setTotalXP(nxp);await save("wb-totalxp",nxp);showToast("🎯 Goal complete! +100 pts");}};
   const updateGoalProgress=(id,progress)=>setGoals(g=>g.map(x=>x.id===id?{...x,progress}:x));
   const saveGoalProgress=async()=>await save("wb-goals-v5",goals);
@@ -1265,7 +1436,10 @@ export default function App() {
   // ── PLANNER ──────────────────────────────────────────────────────────
   const saveWeekPlan=async(upd)=>{
     setWeekPlan(upd);await save(`wb-weekplan-${weekKey()}`,upd);
-    setHistory(null); // keep archive separate
+    // NOTE: this used to call setHistory(null) — which wiped the daily-scoring
+    // history from state on every plan save. Any later read of history[ds]
+    // (date-strip dots, consistency, momentum) then threw on null. The plan
+    // archive below is already a separate store; history should not be touched.
     const na={...planArchive,[weekKey()]:{...upd,savedAt:new Date().toISOString()}};setPlanArchive(na);await save("wb-planarchive",na);
   };
 
@@ -1410,9 +1584,9 @@ export default function App() {
         <div style={{animation:"iconPop 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards",marginBottom:20}}>
           <AppIcon size={72} style={{boxShadow:"0 0 40px rgba(35,181,211,0.2)"}}/>
         </div>
-        <div style={{fontSize:32,fontWeight:900,color:"#DFE0E2",letterSpacing:"0.28em",textTransform:"uppercase"}}>MERIDIAN</div>
+        <div style={{fontSize:32,fontWeight:900,color:"#DCE2E6",letterSpacing:"0.28em",textTransform:"uppercase"}}>MERIDIAN</div>
         <div style={{height:1,width:80,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.4),transparent)",margin:"12px 0"}}/>
-        <div style={{fontSize:9,fontWeight:800,color:"#23B5D3",letterSpacing:"0.18em",textTransform:"uppercase"}}>Loading…</div>
+        <div style={{fontSize:9,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.18em",textTransform:"uppercase"}}>Loading…</div>
       </div>
     </>
   );
@@ -1422,9 +1596,9 @@ export default function App() {
       <style>{CSS}</style>
       <div className="loading">
         <AppIcon size={56} style={{marginBottom:20,opacity:0.6}}/>
-        <div style={{fontSize:16,fontWeight:700,color:"#DFE0E2",marginBottom:8,textAlign:"center",padding:"0 30px"}}>Couldn't load your day</div>
-        <div style={{fontSize:13,color:"#4A5A62",marginBottom:24,textAlign:"center",padding:"0 40px",lineHeight:1.6}}>Your data is still safe — this device just couldn't reach it. Check your connection and try again.</div>
-        <button onClick={()=>{setLoading(true);loadAll();}} style={{padding:"13px 28px",borderRadius:10,border:"none",background:"#23B5D3",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Retry</button>
+        <div style={{fontSize:16,fontWeight:700,color:"#DCE2E6",marginBottom:8,textAlign:"center",padding:"0 30px"}}>Couldn't load your day</div>
+        <div style={{fontSize:13,color:"#454F56",marginBottom:24,textAlign:"center",padding:"0 40px",lineHeight:1.6}}>Your data is still safe — this device just couldn't reach it. Check your connection and try again.</div>
+        <button onClick={()=>{setLoading(true);loadAll();}} style={{padding:"13px 28px",borderRadius:10,border:"none",background:"#2B5F7D",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Retry</button>
       </div>
     </>
   );
@@ -1466,7 +1640,7 @@ export default function App() {
       {showYearMap&&(
         <div className="yearmap-overlay" onClick={()=>setShowYearMap(false)}>
           <div className="yearmap-sheet" onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:20,fontWeight:800,color:"#0B1929",marginBottom:4}}>{yearKey()} in Review</div>
+            <div style={{fontSize:20,fontWeight:800,color:"#121A20",marginBottom:4}}>{yearKey()} in Review</div>
             <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
               {[["#059669","100%"],["#34D399","80%+"],["#F59E0B","40%+"],["#EF4444","<40%"]].map(([c,l])=>(
                 <span key={l} style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:"#64748B"}}>
@@ -1486,7 +1660,7 @@ export default function App() {
                       const h=history[ds];const isToday=ds===today;
                       const bg=h?(h.pct>=100?"#059669":h.pct>=80?"#34D399":h.pct>=40?"#F59E0B":"#EF4444"):"#E2E8F0";
                       return(
-                        <div key={ds} className="yearmap-cell" style={{background:bg,color:h||isToday?"rgba(255,255,255,0.9)":"#CBD5E1",outline:isToday?"2px solid #2563EB":"none"}}
+                        <div key={ds} className="yearmap-cell" style={{background:bg,color:h||isToday?"rgba(255,255,255,0.9)":"#CBD5E1",outline:isToday?"2px solid #35617E":"none"}}
                           onClick={()=>{setShowYearMap(false);viewPastDay(ds);}}>
                           {d}
                         </div>
@@ -1515,7 +1689,7 @@ export default function App() {
             <div className="editor-body">
               <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:16,paddingBottom:4}}>
                 {EDITOR_TABS.map(({key,label})=>(
-                  <button key={key} onClick={()=>setEditorTab(key)} style={{flexShrink:0,padding:"8px 14px",borderRadius:100,border:"none",background:editorTab===key?"linear-gradient(135deg,#1A3A6B,#2563EB)":"rgba(255,255,255,0.65)",color:editorTab===key?"#fff":"#64748B",fontSize:13,fontWeight:700,cursor:"pointer"}}>{label}</button>
+                  <button key={key} onClick={()=>setEditorTab(key)} style={{flexShrink:0,padding:"8px 14px",borderRadius:100,border:"none",background:editorTab===key?"linear-gradient(135deg,#1A3A6B,#35617E)":"rgba(255,255,255,0.65)",color:editorTab===key?"#fff":"#64748B",fontSize:13,fontWeight:700,cursor:"pointer"}}>{label}</button>
                 ))}
               </div>
               <div style={{fontSize:12,fontWeight:800,color:"#64748B",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10}}>{EDITOR_TABS.find(t=>t.key===editorTab)?.label} Items</div>
@@ -1549,15 +1723,15 @@ export default function App() {
                   ? <img src={avatar} style={{width:36,height:36,borderRadius:8,objectFit:"cover",border:"1px solid rgba(35,181,211,0.3)"}} alt="You"/>
                   : <AppIcon size={36}/>
                 }
-                <div style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:"50%",background:"#23B5D3",border:"2px solid #071013",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#071013",fontWeight:900}}>✎</div>
+                <div style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:"50%",background:"#2B5F7D",border:"2px solid #10171C",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#10171C",fontWeight:900}}>✎</div>
               </div>
               {/* AVATAR MENU */}
               {showAvatarMenu&&(
-                <div style={{position:"absolute",top:60,left:18,background:"#0D1A1E",border:"1px solid rgba(35,181,211,0.2)",borderRadius:10,padding:8,zIndex:100,boxShadow:"0 8px 32px rgba(0,0,0,0.6)",minWidth:180}}>
+                <div style={{position:"absolute",top:60,left:18,background:"#121A1E",border:"1px solid rgba(35,181,211,0.2)",borderRadius:10,padding:8,zIndex:100,boxShadow:"0 8px 32px rgba(0,0,0,0.6)",minWidth:180}}>
                   <input ref={avatarInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleAvatarUpload}/>
-                  <button onClick={()=>avatarInputRef.current?.click()} style={{display:"block",width:"100%",padding:"10px 14px",background:"none",border:"none",color:"#DFE0E2",fontSize:13,fontWeight:700,textAlign:"left",cursor:"pointer",letterSpacing:"0.04em"}}>📷 Upload Photo</button>
-                  {avatar&&<button onClick={removeAvatar} style={{display:"block",width:"100%",padding:"10px 14px",background:"none",border:"none",color:"#4A5A62",fontSize:13,fontWeight:700,textAlign:"left",cursor:"pointer",borderTop:"1px solid rgba(255,255,255,0.06)",letterSpacing:"0.04em"}}>Remove Photo</button>}
-                  <button onClick={()=>setShowAvatarMenu(false)} style={{display:"block",width:"100%",padding:"10px 14px",background:"none",border:"none",color:"#4A5A62",fontSize:12,textAlign:"left",cursor:"pointer",letterSpacing:"0.04em"}}>Cancel</button>
+                  <button onClick={()=>avatarInputRef.current?.click()} style={{display:"block",width:"100%",padding:"10px 14px",background:"none",border:"none",color:"#DCE2E6",fontSize:13,fontWeight:700,textAlign:"left",cursor:"pointer",letterSpacing:"0.04em"}}>📷 Upload Photo</button>
+                  {avatar&&<button onClick={removeAvatar} style={{display:"block",width:"100%",padding:"10px 14px",background:"none",border:"none",color:"#454F56",fontSize:13,fontWeight:700,textAlign:"left",cursor:"pointer",borderTop:"1px solid rgba(255,255,255,0.06)",letterSpacing:"0.04em"}}>Remove Photo</button>}
+                  <button onClick={()=>setShowAvatarMenu(false)} style={{display:"block",width:"100%",padding:"10px 14px",background:"none",border:"none",color:"#454F56",fontSize:12,textAlign:"left",cursor:"pointer",letterSpacing:"0.04em"}}>Cancel</button>
                 </div>
               )}
               <div>
@@ -1616,9 +1790,36 @@ export default function App() {
                   {todayMode==="saturday"&&(
                     <button className={`travel-toggle ${lessonThisWeek?"on":"off"}`} onClick={toggleLessonWeek}>🎸 {lessonThisWeek?"Lesson this week":"No lesson this week"}</button>
                   )}
-                  <div style={{marginLeft:"auto",display:"flex",gap:12,fontSize:11,fontWeight:800,color:"#7A9AAA",letterSpacing:"0.06em"}}>
-                    <span>🎟️ {graceTokens} grace</span>
-                    <span>❤️ {healthStreak.current}d health</span>
+                  <button onClick={()=>setShowMomentumInfo(v=>!v)} style={{marginLeft:"auto",display:"flex",gap:12,fontSize:11,fontWeight:800,color:"#6E7F8A",letterSpacing:"0.06em",background:"none",border:"none",cursor:"pointer",alignItems:"center"}}>
+                    <span>{momentum.active30}/30 days active</span>
+                    <span style={{color:"#CBD5E1"}}>·</span>
+                    <span>{graceTokens} grace</span>
+                    <span style={{fontSize:13,color:"#A6B2BA"}}>ⓘ</span>
+                  </button>
+                </div>
+              )}
+
+              {showMomentumInfo&&!viewDate&&(
+                <div style={{background:"#F5F7F8",border:"1px solid rgba(35,181,211,0.22)",borderRadius:14,padding:"14px 16px",marginBottom:12,fontSize:12.5,color:"#3A4C57",lineHeight:1.6}}>
+                  <div style={{fontWeight:800,color:"#17384A",marginBottom:8}}>How momentum works</div>
+                  <div style={{marginBottom:8}}>
+                    A day counts if <strong>any</strong> of these is true — the keystone is done,
+                    half the core list is done, or it's a Sabbath or declared rest day.
+                    Rest counts as participation, not as a break in the chain.
+                  </div>
+                  <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:8}}>
+                    <span><strong>{momentum.current}</strong> day run</span>
+                    <span><strong>{momentum.best}</strong> best</span>
+                    <span><strong>{momentum.fullDays}</strong> full days this month</span>
+                  </div>
+                  <div style={{paddingTop:8,borderTop:"1px solid rgba(35,181,211,0.18)"}}>
+                    <strong style={{fontWeight:800}}>Grace ({graceTokens} held).</strong> You earn one a week, up to four.
+                    A missed day spends one automatically and keeps the run intact — you don't have to do anything.
+                    They exist so a hard week doesn't erase a good quarter.
+                  </div>
+                  <div style={{marginTop:8}}>
+                    <strong style={{fontWeight:800}}>Health run: {healthStreak.current} days.</strong> Tracked separately —
+                    counts any day the health items on the core list were done.
                   </div>
                 </div>
               )}
@@ -1641,7 +1842,7 @@ export default function App() {
                           <div className="day-chip-dow">{DAYS[d.getDay()]}</div>
                           <div className="day-chip-num">{d.getDate()}</div>
                           {dc&&<div className="day-dot" style={{background:dc}}/>}
-                          {isToday&&!viewDate&&<div className="day-dot" style={{background:"#2563EB"}}/>}
+                          {isToday&&!viewDate&&<div className="day-dot" style={{background:"#35617E"}}/>}
                         </div>
                       </div>
                     );
@@ -1658,7 +1859,7 @@ export default function App() {
                   <div className="history-banner">
                     <div>
                       <div className="history-banner-text">📅 {new Date(viewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
-                      <div style={{fontSize:12,color:"#071013",marginTop:2}}>{history[viewDate]?.pts||0}/{history[viewDate]?.maxPts||0} pts — tap to edit</div>
+                      <div style={{fontSize:12,color:"#10171C",marginTop:2}}>{history[viewDate]?.pts||0}/{history[viewDate]?.maxPts||0} pts — tap to edit</div>
                     </div>
                     <button className="history-banner-btn" onClick={()=>setViewDate(null)}>Today ›</button>
                   </div>
@@ -1674,39 +1875,43 @@ export default function App() {
                 <>
                   <div className="sec"><div className="sec-title">Today</div><div className="sec-sub">{Object.values(todayState).filter(v=>v?.checked).length}/{todayItems.length} done</div></div>
 
-                  <div style={{background:"#EAF7FB",border:"1px solid rgba(35,181,211,0.2)",borderRadius:12,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#0D6B85",lineHeight:1.5}}>
+                  <div style={{background:"#EDF1F3",border:"1px solid rgba(35,181,211,0.2)",borderRadius:12,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#17384A",lineHeight:1.5}}>
                     ✦ A gentle target: one keystone, a couple of steadying things. Bonus is truly optional.
                   </div>
 
-                  {keystoneItem && (
-                    <div style={{background:"linear-gradient(145deg,#1A93AC,#23B5D3)",borderRadius:20,padding:22,marginBottom:14,position:"relative",overflow:"hidden",boxShadow:"0 8px 24px rgba(35,181,211,0.25)"}}>
-                      <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.75)",background:"rgba(255,255,255,0.15)",display:"inline-block",padding:"4px 10px",borderRadius:100,marginBottom:12}}>Today's Keystone</div>
+                  {isSabbathToday && (
+                    <div style={{background:"linear-gradient(145deg,#333F47,#5C6E7A)",borderRadius:20,padding:24,marginBottom:14,boxShadow:"0 8px 24px rgba(117,171,188,0.28)"}}>
+                      <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.75)",background:"rgba(255,255,255,0.15)",display:"inline-block",padding:"4px 10px",borderRadius:100,marginBottom:14}}>Sabbath</div>
+                      <div style={{fontSize:20,fontWeight:800,color:"#fff",marginBottom:10,lineHeight:1.3}}>{sabbathInvitation?.text}</div>
+                      <div style={{fontSize:13,color:"rgba(255,255,255,0.9)",lineHeight:1.6}}>{sabbathInvitation?.sub}</div>
+                      <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid rgba(255,255,255,0.18)",fontSize:11.5,color:"rgba(255,255,255,0.78)",lineHeight:1.6}}>
+                        No keystone today, on purpose. Rest days don't come with assignments — the streak is already safe.
+                      </div>
+                    </div>
+                  )}
+
+                  {keystoneItem && !isSabbathToday && (
+                    <div style={{background:"linear-gradient(145deg,#1B3443,#2F5C74)",borderRadius:20,padding:22,marginBottom:14,position:"relative",overflow:"hidden",boxShadow:"0 8px 24px rgba(35,181,211,0.25)"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8}}>
+                        <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.75)",background:"rgba(255,255,255,0.15)",display:"inline-block",padding:"4px 10px",borderRadius:100}}>Today's Keystone</div>
+                        <div style={{fontSize:9.5,fontWeight:800,letterSpacing:"0.1em",textTransform:"uppercase",color:"rgba(255,255,255,0.6)"}}>{keystoneItem.domain}</div>
+                      </div>
                       <div style={{fontSize:21,fontWeight:800,color:"#fff",marginBottom:14,lineHeight:1.25}}>{keystoneItem.text}</div>
                       <div style={{display:"flex",gap:20,marginBottom:16,flexWrap:"wrap"}}>
                         <div style={{flex:1,minWidth:120}}>
                           <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Why it matters</div>
-                          <div style={{fontSize:12.5,color:"rgba(255,255,255,0.92)",lineHeight:1.5}}>{keystoneWhy[keystoneItem.id]||keystoneItem.sub}</div>
+                          <div style={{fontSize:12.5,color:"rgba(255,255,255,0.92)",lineHeight:1.5}}>{keystoneItem.why}</div>
                         </div>
                         <div style={{flex:1,minWidth:120}}>
-                          <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Minimum version</div>
-                          <div style={{fontSize:12.5,color:"rgba(255,255,255,0.92)",lineHeight:1.5}}>{keystoneMin[keystoneItem.id]||"Just start. A little counts."}</div>
+                          <div style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>If today is thin</div>
+                          <div style={{fontSize:12.5,color:"rgba(255,255,255,0.92)",lineHeight:1.5}}>{keystoneItem.min}</div>
                         </div>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                        <button onClick={()=>handleToggle(keystoneItem.id,keystoneItem,todayState)} style={{background:"#fff",color:"#0D6B85",border:"none",borderRadius:100,padding:"10px 20px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
-                          {todayState[keystoneItem.id]?.checked?"✓ Complete":"Mark complete"}
+                        <button onClick={completeKeystone} style={{background:keystoneDone?"rgba(255,255,255,0.22)":"#fff",color:keystoneDone?"#fff":"#17384A",border:"none",borderRadius:100,padding:"10px 20px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                          {keystoneDone?"✓ Done today":"Mark complete"}
                         </button>
-                        {coreItems.length>1 && (
-                          <button onClick={()=>{
-                            const others = coreItems.filter(i=>i.id!==keystoneItem.id);
-                            if(others.length===0)return;
-                            const idx = others.findIndex(i=>i.id===keystoneOverrideId);
-                            setKeystoneOverrideId(others[(idx+1)%others.length].id);
-                          }} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>Choose a different keystone</button>
-                        )}
-                      </div>
-                      <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid rgba(255,255,255,0.15)",fontSize:11.5,color:"rgba(255,255,255,0.7)",lineHeight:1.6,fontStyle:"italic"}}>
-                        Why today matters: {visionAnchor.length>140?visionAnchor.slice(0,140)+"…":visionAnchor}
+                        <button onClick={skipKeystone} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>Not today — show another</button>
                       </div>
                     </div>
                   )}
@@ -1725,16 +1930,77 @@ export default function App() {
                     </>
                   )}
 
-                  {surfacedGoal&&(
-                    <>
-                      <div className="sec"><div className="sec-title">The Larger Arc</div><div className="sec-sub">so the year doesn't get lost</div></div>
-                      <div className="g-card" style={{borderLeft:`3px solid ${DOMAIN_CFG[surfacedGoal.domain]?.color||"#23B5D3"}`}}>
-                        <div style={{fontSize:15,fontWeight:700,color:"#0B1929",marginBottom:4}}>{surfacedGoal.title}</div>
-                        <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>{surfacedGoal.detail} — a small action keeps this alive.</div>
-                        <div className="g-prog-row" style={{marginBottom:0}}>
-                          <div className="g-prog-track"><div className="g-prog-fill" style={{width:`${surfacedGoal.progress}%`,background:DOMAIN_CFG[surfacedGoal.domain]?.color}}/></div>
-                          <div className="g-prog-pct">{surfacedGoal.progress}%</div>
+                  {travelMode && (
+                    <div style={{background:"#F5F7F8",border:"1px solid #D3DBE0",borderLeft:"3px solid #2B5F7D",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+                      <div style={{fontSize:11.5,fontWeight:800,color:"#17384A",letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>Travel — {travelDest||"on the road"}</div>
+                      <div style={{fontSize:12.5,color:"#454F56",lineHeight:1.55}}>
+                        Heavy lifts are off today's keystone rotation on purpose. The things that hold on the road: protein, a walk, and a message home before boarding.
+                      </div>
+                      {momentum.current>0&&(
+                        <div style={{fontSize:12,color:"#17384A",fontWeight:700,marginTop:7}}>
+                          → {momentum.current}-day run is intact. A rest day or one grace token keeps it that way.
                         </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* WEEKLY REVIEW — the app answering back, not just recording */}
+                  <div className="sec">
+                    <div className="sec-title">This Week</div>
+                    <button onClick={()=>setShowReview(v=>!v)} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#2B5F7D",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>{showReview?"Hide":"Review ›"}</button>
+                  </div>
+                  <div className="g-card" style={{marginBottom:12}}>
+                    <div style={{fontSize:14,fontWeight:700,color:"#121A20",marginBottom:8,lineHeight:1.35}}>{weeklyReview.headline}</div>
+                    <div style={{display:"flex",gap:18,flexWrap:"wrap",fontSize:11.5,color:"#6E7F8A",fontWeight:700}}>
+                      <span><strong style={{color:"#2B5F7D",fontSize:14}}>{weeklyReview.keystoneDays}</strong> keystones</span>
+                      <span><strong style={{color:"#2B5F7D",fontSize:14}}>{weeklyReview.avg}%</strong> avg day</span>
+                      <span><strong style={{color:"#2B5F7D",fontSize:14}}>{weeklyReview.journalDays}</strong> journal</span>
+                    </div>
+                    {showReview&&(
+                      <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #E4E9EC",display:"grid",gap:12}}>
+                        {weeklyReview.observations.map((o,idx)=>{
+                          const tone = o.severity==="high"?"#8C4A3F":o.severity==="medium"?"#7A5C3E":o.severity==="good"?"#3F6B54":"#6E7F8A";
+                          return (
+                            <div key={idx} style={{borderLeft:`3px solid ${tone}`,paddingLeft:11}}>
+                              <div style={{fontSize:12.5,fontWeight:800,color:tone,marginBottom:3}}>{o.title}</div>
+                              <div style={{fontSize:12.5,color:"#454F56",lineHeight:1.55}}>{o.body}</div>
+                              {o.action&&<div style={{fontSize:12,color:"#17384A",lineHeight:1.5,marginTop:5,fontWeight:600}}>→ {o.action}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {surfacedArc && (
+                    <>
+                      <div className="sec">
+                        <div className="sec-title">The Larger Arc</div>
+                        <button onClick={cycleArc} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#2B5F7D",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Another ›</button>
+                      </div>
+                      <div className="g-card" style={{borderLeft:`3px solid ${DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10}}>
+                          <div style={{fontSize:15,fontWeight:700,color:"#121A20",marginBottom:4}}>{surfacedArc.title}</div>
+                          <div style={{fontSize:10.5,fontWeight:800,color:"#94A3B8",whiteSpace:"nowrap"}}>{surfacedArcDone}/{(surfacedArc.steps||[]).length}</div>
+                        </div>
+                        <div style={{fontSize:12,color:"#64748B",marginBottom:12}}>{surfacedArc.detail}</div>
+                        <div style={{display:"grid",gap:2}}>
+                          {(surfacedArc.steps||[]).map(st=>(
+                            <button key={st.id} onClick={()=>toggleArcStep(surfacedArc.id,st.id)}
+                              style={{display:"flex",alignItems:"flex-start",gap:9,textAlign:"left",background:"none",border:"none",padding:"7px 0",cursor:"pointer",width:"100%"}}>
+                              <span style={{flexShrink:0,width:17,height:17,borderRadius:5,marginTop:1,
+                                border:st.done?"none":"1.5px solid #CBD5E1",
+                                background:st.done?(DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"):"transparent",
+                                color:"#fff",fontSize:11,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{st.done?"✓":""}</span>
+                              <span style={{fontSize:13,lineHeight:1.45,color:st.done?"#94A3B8":"#334155",textDecoration:st.done?"line-through":"none"}}>{st.text}</span>
+                            </button>
+                          ))}
+                        </div>
+                        {surfacedArcNext && (
+                          <div style={{marginTop:12,paddingTop:11,borderTop:"1px solid #E8EEF2",fontSize:11.5,color:"#17384A",lineHeight:1.5}}>
+                            <strong style={{fontWeight:800}}>Next:</strong> {surfacedArcNext.text}
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -1755,8 +2021,8 @@ export default function App() {
                             <div className="c-hint">{new Date(n.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
                           </div>
                           <div style={{display:"flex",gap:6}}>
-                            <button onClick={()=>promoteQuickNote(n,"journal")} title="Move to journal" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#23B5D3"}}>📓</button>
-                            <button onClick={()=>promoteQuickNote(n,"task")} title="Turn into a task" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#23B5D3"}}>✓</button>
+                            <button onClick={()=>promoteQuickNote(n,"journal")} title="Move to journal" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#2B5F7D"}}>📓</button>
+                            <button onClick={()=>promoteQuickNote(n,"task")} title="Turn into a task" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#2B5F7D"}}>✓</button>
                             <button onClick={()=>deleteQuickNote(n.id)} className="todo-del">×</button>
                           </div>
                         </div>
@@ -1767,7 +2033,7 @@ export default function App() {
                   {/* ── TASKS WITH CATEGORIES ── */}
                   <div className="sec">
                     <div className="sec-title">Tasks</div>
-                    <button onClick={()=>setAddingCat(true)} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#23B5D3",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>+ Category</button>
+                    <button onClick={()=>setAddingCat(true)} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#2B5F7D",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>+ Category</button>
                   </div>
 
                   {/* Add category form */}
@@ -1815,7 +2081,7 @@ export default function App() {
                         {/* Category header */}
                         <div className="cat-header" onClick={()=>toggleCatCollapse(cat.id)}>
                           <div className="cat-chevron" style={{transform:cat.collapsed?"rotate(-90deg)":"rotate(0deg)"}}>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#A2AEBB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8B99A3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="2 4 6 8 10 4"/>
                             </svg>
                           </div>
@@ -1848,7 +2114,7 @@ export default function App() {
                         {!cat.collapsed&&(
                           <div className="check-card" style={{marginTop:0,borderRadius:"0 0 14px 14px",borderTop:"none"}}>
                             {catTodos.length===0&&(
-                              <div style={{padding:"16px 18px",fontSize:13,color:"#A2AEBB",fontStyle:"italic"}}>
+                              <div style={{padding:"16px 18px",fontSize:13,color:"#8B99A3",fontStyle:"italic"}}>
                                 No tasks yet — type above to add one
                               </div>
                             )}
@@ -1857,7 +2123,7 @@ export default function App() {
                                 <div className="c-row" style={{borderBottom:"none"}}>
                                   <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
                                   <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
-                                    <div className="c-main" style={{color:todo.done?"#A2AEBB":"#071013",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
+                                    <div className="c-main" style={{color:todo.done?"#8B99A3":"#10171C",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
                                   </div>
                                   <button
                                     onClick={()=>setAddingSubFor(addingSubFor===todo.id?null:todo.id)}
@@ -1872,7 +2138,7 @@ export default function App() {
                                     {todo.subitems.map(sub=>(
                                       <div key={sub.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px 6px 0"}}>
                                         <div className={`todo-circle ${sub.done?"done":""}`} style={{width:16,height:16,flexShrink:0}} onClick={()=>toggleSubTodo(todo.id,sub.id)}/>
-                                        <div onClick={()=>toggleSubTodo(todo.id,sub.id)} style={{flex:1,cursor:"pointer",fontSize:12.5,color:sub.done?"#A2AEBB":"#4A5A62",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</div>
+                                        <div onClick={()=>toggleSubTodo(todo.id,sub.id)} style={{flex:1,cursor:"pointer",fontSize:12.5,color:sub.done?"#8B99A3":"#454F56",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</div>
                                         <button className="todo-del" style={{fontSize:14}} onClick={()=>deleteSubTodo(todo.id,sub.id)}>×</button>
                                       </div>
                                     ))}
@@ -1930,8 +2196,8 @@ export default function App() {
                 <>
                   <div className="sec"><div className="sec-title">This Week</div><div className="sec-sub">{weeklyPct}% · {weeklyPts}/{weeklyMax} pts</div></div>
                   <CheckGroup items={weeklyItems} state={weeklyState} onToggle={handleWeekly} bouncing={bouncing} travel={false}/>
-                  <div style={{background:"linear-gradient(135deg,#071013,#0D1A1E)",borderRadius:"16px 16px 0 0",padding:"12px 18px",display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:8,height:8,borderRadius:"50%",background:"#23B5D3",boxShadow:"0 0 8px rgba(35,181,211,0.4)"}}/>
+                  <div style={{background:"linear-gradient(135deg,#10171C,#121A1E)",borderRadius:"16px 16px 0 0",padding:"12px 18px",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:"#2B5F7D",boxShadow:"0 0 8px rgba(35,181,211,0.4)"}}/>
                     <div><div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.9)",letterSpacing:"0.06em",textTransform:"uppercase"}}>IJM Leadership</div><div style={{fontSize:11,color:"rgba(255,255,255,0.35)"}}>Strategic + platform layer</div></div>
                   </div>
                   <div className="check-card" style={{borderRadius:"0 0 20px 20px",marginBottom:12}}>
@@ -1944,12 +2210,12 @@ export default function App() {
                   <div className="sec"><div className="sec-title">This Month</div></div>
                   <div className="prompt-card" onClick={()=>setShowFF(true)}>
                     <div style={{fontSize:22}}>👥</div>
-                    <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#23B5D3"}}>Log a connection</div><div style={{fontSize:11,color:"#4A5A62"}}>{friendLog.length} this year</div></div>
-                    <div style={{fontSize:14,color:"#4A5A62"}}>+</div>
+                    <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div><div style={{fontSize:11,color:"#454F56"}}>{friendLog.length} this year</div></div>
+                    <div style={{fontSize:14,color:"#454F56"}}>+</div>
                   </div>
                   {showFF&&(
                     <div className="add-form">
-                      <div style={{fontSize:17,fontWeight:800,color:"#0B1929",marginBottom:14}}>Who did you connect with?</div>
+                      <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>Who did you connect with?</div>
                       <input className="field" placeholder="Name…" value={friendInput.name} onChange={e=>setFriendInput(p=>({...p,name:e.target.value}))}/>
                       <input className="field" placeholder="Dinner, coffee, call…" value={friendInput.note} onChange={e=>setFriendInput(p=>({...p,note:e.target.value}))}/>
                       <div className="btn-row"><button className="btn-s" onClick={()=>setShowFF(false)}>Cancel</button><button className="btn-p" onClick={addFriend}>Log it</button></div>
@@ -1960,7 +2226,7 @@ export default function App() {
               )}
               {rhythmTab==="annual"&&(
                 <>
-                  <div style={{background:"linear-gradient(135deg,#071013,#071013,#071013)",borderRadius:24,padding:22,marginBottom:12}}>
+                  <div style={{background:"linear-gradient(135deg,#10171C,#10171C,#10171C)",borderRadius:24,padding:22,marginBottom:12}}>
                     <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>{yearKey()} Annual</div>
                     <div style={{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:2}}>Health & Foundations</div>
                     <div style={{fontSize:13,color:"rgba(255,255,255,0.5)"}}>{Object.values(annualState).filter(v=>v?.checked).length}/{(lists.annual||DEFAULT_LISTS.annual).length} complete</div>
@@ -1992,10 +2258,10 @@ export default function App() {
               <div className="sec"><div className="sec-title">This Month</div><div className="sec-sub">Tap to log · pts awarded</div></div>
               <CheckGroup items={platItems} state={platState} onToggle={handlePlat} bouncing={bouncing} travel={false}/>
               <div className="sec"><div className="sec-title">Projects</div></div>
-              {[{title:"Recalibrated",sub:"Faith + leadership book",color:"#7C3AED",stage:"Writing"},{title:"The Sequence",sub:"Marketing book",color:"#2563EB",stage:"Writing"},{title:"One Five One",sub:"Men's movement",color:"#0891B2",stage:"Building"},{title:"BenWebb.com",sub:"Unified platform",color:"#23B5D3",stage:"Planning"}].map(p=>(
+              {[{title:"Recalibrated",sub:"Faith + leadership book",color:"#7C3AED",stage:"Writing"},{title:"The Sequence",sub:"Marketing book",color:"#35617E",stage:"Writing"},{title:"One Five One",sub:"Men's movement",color:"#0891B2",stage:"Building"},{title:"BenWebb.com",sub:"Unified platform",color:"#2B5F7D",stage:"Planning"}].map(p=>(
                 <div key={p.title} className="g-card" style={{borderLeft:`3px solid ${p.color}`,marginBottom:8}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div><div style={{fontSize:15,fontWeight:700,color:"#0B1929"}}>{p.title}</div><div style={{fontSize:12,color:"#64748B",marginTop:2}}>{p.sub}</div></div>
+                    <div><div style={{fontSize:15,fontWeight:700,color:"#121A20"}}>{p.title}</div><div style={{fontSize:12,color:"#64748B",marginTop:2}}>{p.sub}</div></div>
                     <div style={{fontSize:11,fontWeight:700,background:"rgba(255,255,255,0.05)",color:p.color,padding:"4px 10px",borderRadius:4,border:`1px solid ${p.color}30`}}>{p.stage}</div>
                   </div>
                 </div>
@@ -2026,27 +2292,27 @@ export default function App() {
               <div className="fin-grid">
                 <div className="fin-card">
                   <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",color:"#94A3B8",marginBottom:6}}>Debt Reduction</div>
-                  <div style={{fontSize:28,fontWeight:900,letterSpacing:"-0.04em",lineHeight:1,marginBottom:8,color:"#23B5D3"}}>{debtPct}%</div>
+                  <div style={{fontSize:28,fontWeight:900,letterSpacing:"-0.04em",lineHeight:1,marginBottom:8,color:"#2B5F7D"}}>{debtPct}%</div>
                   <div style={{height:5,background:"rgba(11,25,41,0.08)",borderRadius:100,overflow:"hidden",marginBottom:6}}><div style={{height:"100%",background:"linear-gradient(90deg,#059669,#34D399)",borderRadius:100,width:`${debtPct}%`,transition:"width 0.8s"}}/></div>
                   <div style={{fontSize:12,color:"#94A3B8"}}>${(financials.debtStart-financials.debtCurrent).toLocaleString()} reduced</div>
                 </div>
                 <div className="fin-card">
                   <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",color:"#94A3B8",marginBottom:6}}>Savings</div>
-                  <div style={{fontSize:28,fontWeight:900,letterSpacing:"-0.04em",lineHeight:1,marginBottom:8,color:"#75ABBC"}}>{savPct}%</div>
-                  <div style={{height:5,background:"rgba(11,25,41,0.08)",borderRadius:100,overflow:"hidden",marginBottom:6}}><div style={{height:"100%",background:"linear-gradient(90deg,#2563EB,#60A5FA)",borderRadius:100,width:`${savPct}%`,transition:"width 0.8s"}}/></div>
+                  <div style={{fontSize:28,fontWeight:900,letterSpacing:"-0.04em",lineHeight:1,marginBottom:8,color:"#6B8494"}}>{savPct}%</div>
+                  <div style={{height:5,background:"rgba(11,25,41,0.08)",borderRadius:100,overflow:"hidden",marginBottom:6}}><div style={{height:"100%",background:"linear-gradient(90deg,#35617E,#60A5FA)",borderRadius:100,width:`${savPct}%`,transition:"width 0.8s"}}/></div>
                   <div style={{fontSize:12,color:"#94A3B8"}}>${financials.savingsCurrent.toLocaleString()} of ${financials.savingsTarget.toLocaleString()}</div>
                 </div>
               </div>
-              {!showFinForm&&<div className="prompt-card" onClick={()=>setShowFinForm(true)}><div style={{fontSize:22}}>✏️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:"#23B5D3",letterSpacing:"0.04em",textTransform:"uppercase"}}>Update numbers</div><div style={{fontSize:11,color:"#4A5A62"}}>Debt, savings, targets</div></div><div style={{fontSize:14,color:"#4A5A62"}}>›</div></div>}
+              {!showFinForm&&<div className="prompt-card" onClick={()=>setShowFinForm(true)}><div style={{fontSize:22}}>✏️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.04em",textTransform:"uppercase"}}>Update numbers</div><div style={{fontSize:11,color:"#454F56"}}>Debt, savings, targets</div></div><div style={{fontSize:14,color:"#454F56"}}>›</div></div>}
               {showFinForm&&(
                 <div className="fin-edit">
-                  <div style={{fontSize:16,fontWeight:700,color:"#0B1929",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>Update Financials<button onClick={()=>setShowFinForm(false)} style={{background:"none",border:"none",color:"#94A3B8",fontSize:14,cursor:"pointer",fontWeight:600}}>Done</button></div>
+                  <div style={{fontSize:16,fontWeight:700,color:"#121A20",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>Update Financials<button onClick={()=>setShowFinForm(false)} style={{background:"none",border:"none",color:"#94A3B8",fontSize:14,cursor:"pointer",fontWeight:600}}>Done</button></div>
                   {[["debtStart","Debt Start"],["debtCurrent","Debt Now"],["savingsTarget","Savings Target"],["savingsCurrent","Savings Now"]].reduce((rows,item,i)=>{if(i%2===0)rows.push([]);rows[rows.length-1].push(item);return rows;},[]).map((pair,ri)=>(
                     <div key={ri} style={{display:"flex",gap:10,marginBottom:10}}>
                       {pair.map(([field,label])=>(
                         <div key={field} style={{flex:1}}>
                           <div style={{fontSize:11,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{label}</div>
-                          <input style={{width:"100%",background:"#F0F4FA",border:"1.5px solid transparent",borderRadius:12,padding:"11px 13px",fontSize:16,fontWeight:700,color:"#0B1929",outline:"none"}} type="number" value={financials[field]} onChange={async e=>{const nf={...financials,[field]:Number(e.target.value)};setFinancials(nf);await save("wb-fin-v2",nf);}}/>
+                          <input style={{width:"100%",background:"#F0F4FA",border:"1.5px solid transparent",borderRadius:12,padding:"11px 13px",fontSize:16,fontWeight:700,color:"#121A20",outline:"none"}} type="number" value={financials[field]} onChange={async e=>{const nf={...financials,[field]:Number(e.target.value)};setFinancials(nf);await save("wb-fin-v2",nf);}}/>
                         </div>
                       ))}
                     </div>
@@ -2054,10 +2320,10 @@ export default function App() {
                 </div>
               )}
               <div className="sec"><div className="sec-title">Connections</div><div className="sec-sub">{friendLog.length} this year</div></div>
-              <div className="prompt-card" onClick={()=>setShowFF(true)}><div style={{fontSize:22}}>👥</div><div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#23B5D3"}}>Log a connection</div></div><div style={{fontSize:14,color:"#4A5A62"}}>+</div></div>
+              <div className="prompt-card" onClick={()=>setShowFF(true)}><div style={{fontSize:22}}>👥</div><div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div></div><div style={{fontSize:14,color:"#454F56"}}>+</div></div>
               {showFF&&(
                 <div className="add-form">
-                  <div style={{fontSize:17,fontWeight:800,color:"#0B1929",marginBottom:14}}>Who did you connect with?</div>
+                  <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>Who did you connect with?</div>
                   <input className="field" placeholder="Name…" value={friendInput.name} onChange={e=>setFriendInput(p=>({...p,name:e.target.value}))}/>
                   <input className="field" placeholder="Dinner, coffee, call…" value={friendInput.note} onChange={e=>setFriendInput(p=>({...p,note:e.target.value}))}/>
                   <div className="btn-row"><button className="btn-s" onClick={()=>setShowFF(false)}>Cancel</button><button className="btn-p" onClick={addFriend}>Log it</button></div>
@@ -2068,7 +2334,7 @@ export default function App() {
                   {friendLog.map(f=>(
                     <div key={f.id} className="friend-row">
                       <div className="friend-av">{f.name.charAt(0)}</div>
-                      <div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:"#0B1929"}}>{f.name}</div>{f.note&&<div style={{fontSize:12,color:"#64748B"}}>{f.note}</div>}<div style={{fontSize:11,color:"#CBD5E1"}}>{formatShort(f.date)}</div></div>
+                      <div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:"#121A20"}}>{f.name}</div>{f.note&&<div style={{fontSize:12,color:"#64748B"}}>{f.note}</div>}<div style={{fontSize:11,color:"#CBD5E1"}}>{formatShort(f.date)}</div></div>
                       <button style={{background:"none",border:"none",color:"#E2E8F0",fontSize:20,cursor:"pointer",padding:4}} onClick={async()=>{const nl=friendLog.filter(x=>x.id!==f.id);setFriendLog(nl);await save("wb-friends-v2",nl);}}>×</button>
                     </div>
                   ))}
@@ -2079,7 +2345,7 @@ export default function App() {
                 <div className="sec-sub">{tripLog.length} trips</div>
                 <button
                   onClick={()=>{setShowAddTrip(v=>!v);setEditingTripId(null);setTripDraft({dest:"",start:"",type:"IJM"});}}
-                  style={{marginLeft:"auto",background:"none",border:"none",color:"#23B5D3",fontSize:13,fontWeight:800,cursor:"pointer"}}
+                  style={{marginLeft:"auto",background:"none",border:"none",color:"#2B5F7D",fontSize:13,fontWeight:800,cursor:"pointer"}}
                 >{showAddTrip?"Cancel":"+ Add trip"}</button>
               </div>
 
@@ -2110,10 +2376,10 @@ export default function App() {
                       <div key={t.id} className="trip-row">
                         <span style={{fontSize:22}}>✈️</span>
                         <div style={{flex:1,cursor:"pointer"}} onClick={()=>startEditTrip(t)}>
-                          <div style={{fontSize:15,fontWeight:700,color:"#0B1929"}}>{t.dest}</div>
+                          <div style={{fontSize:15,fontWeight:700,color:"#121A20"}}>{t.dest}</div>
                           <div style={{fontSize:12,color:"#94A3B8"}}>{formatShort(t.start)}</div>
                         </div>
-                        <div style={{fontSize:11,fontWeight:700,background:"#E0F7FA",color:"#23B5D3",padding:"3px 9px",borderRadius:100}}>{t.type||"IJM"}</div>
+                        <div style={{fontSize:11,fontWeight:700,background:"#E0F7FA",color:"#2B5F7D",padding:"3px 9px",borderRadius:100}}>{t.type||"IJM"}</div>
                         <button className="todo-del" onClick={()=>deleteTrip(t.id)}>×</button>
                       </div>
                     )
@@ -2141,7 +2407,7 @@ export default function App() {
               <div className="sec"><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}><div className="sec-title">Goals</div><button className="sec-btn" onClick={()=>setShowAddGoal(p=>!p)}>{showAddGoal?"Cancel":"+ Add"}</button></div></div>
               {showAddGoal&&(
                 <div className="add-form">
-                  <div style={{fontSize:17,fontWeight:800,color:"#0B1929",marginBottom:14}}>New Goal</div>
+                  <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>New Goal</div>
                   <input className="field" placeholder="Goal title…" value={newGoal.title} onChange={e=>setNewGoal(p=>({...p,title:e.target.value}))}/>
                   <input className="field" placeholder="Details…" value={newGoal.detail} onChange={e=>setNewGoal(p=>({...p,detail:e.target.value}))}/>
                   <input className="field" placeholder="Target (e.g. Q3 2026)…" value={newGoal.target} onChange={e=>setNewGoal(p=>({...p,target:e.target.value}))}/>
@@ -2153,7 +2419,7 @@ export default function App() {
               )}
               <div className="chips">
                 {[["all","All"],["family","Family"],["platform","Platform"],["financial","Financial"],["health","Health"]].map(([k,l])=>(
-                  <button key={k} className={`chip ${domainFilter===k?"active":""}`} style={{"--cc":k==="all"?"#2563EB":DOMAIN_CFG[k]?.color}} onClick={()=>setDomainFilter(k)}>{l}</button>
+                  <button key={k} className={`chip ${domainFilter===k?"active":""}`} style={{"--cc":k==="all"?"#35617E":DOMAIN_CFG[k]?.color}} onClick={()=>setDomainFilter(k)}>{l}</button>
                 ))}
               </div>
               {filteredGoals.map(g=>{
@@ -2162,7 +2428,7 @@ export default function App() {
                   <div key={g.id} className={`g-card ${g.completed?"complete":""}`}>
                     {isEditing?(
                       <>
-                        <div style={{fontSize:15,fontWeight:800,color:"#0B1929",marginBottom:12}}>Edit Goal</div>
+                        <div style={{fontSize:15,fontWeight:800,color:"#121A20",marginBottom:12}}>Edit Goal</div>
                         <input className="field" value={editGoalData.title} onChange={e=>setEditGoalData(p=>({...p,title:e.target.value}))} placeholder="Title…"/>
                         <input className="field" value={editGoalData.detail} onChange={e=>setEditGoalData(p=>({...p,detail:e.target.value}))} placeholder="Details…"/>
                         <input className="field" value={editGoalData.target} onChange={e=>setEditGoalData(p=>({...p,target:e.target.value}))} placeholder="Target…"/>
@@ -2223,8 +2489,8 @@ export default function App() {
               {viewPlanWeek&&planArchive[viewPlanWeek]&&(
                 <>
                   <div style={{background:"linear-gradient(135deg,#E0F7FA,#B2EBF2)",border:"1px solid rgba(14,138,160,0.3)",borderRadius:14,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div style={{fontSize:13,fontWeight:700,color:"#071013"}}>📅 Viewing {viewPlanWeek}</div>
-                    <button onClick={()=>setViewPlanWeek(null)} style={{background:"none",border:"none",fontSize:12,fontWeight:800,color:"#23B5D3",cursor:"pointer"}}>Back ›</button>
+                    <div style={{fontSize:13,fontWeight:700,color:"#10171C"}}>📅 Viewing {viewPlanWeek}</div>
+                    <button onClick={()=>setViewPlanWeek(null)} style={{background:"none",border:"none",fontSize:12,fontWeight:800,color:"#2B5F7D",cursor:"pointer"}}>Back ›</button>
                   </div>
                   {[["Top 3","top3"],["Intention","intention"],["Gratitude","gratitude"],["Carry Forward","carryForward"]].map(([label,key])=>{
                     const val=planArchive[viewPlanWeek][key];
@@ -2233,8 +2499,8 @@ export default function App() {
                       <div key={key} style={{marginBottom:16}}>
                         <div style={{fontSize:11,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{label}</div>
                         {Array.isArray(val)
-                          ?val.filter(v=>v).map((v,i)=><div key={i} style={{fontSize:14,color:"#0B1929",padding:"10px 14px",background:"rgba(255,255,255,0.5)",borderRadius:12,marginBottom:6}}>{i+1}. {v}</div>)
-                          :<div style={{fontSize:14,color:"#2A4050",lineHeight:1.65,background:"rgba(255,255,255,0.5)",borderRadius:12,padding:"12px 14px"}}>{val}</div>
+                          ?val.filter(v=>v).map((v,i)=><div key={i} style={{fontSize:14,color:"#121A20",padding:"10px 14px",background:"rgba(255,255,255,0.5)",borderRadius:12,marginBottom:6}}>{i+1}. {v}</div>)
+                          :<div style={{fontSize:14,color:"#2C3A44",lineHeight:1.65,background:"rgba(255,255,255,0.5)",borderRadius:12,padding:"12px 14px"}}>{val}</div>
                         }
                       </div>
                     );
@@ -2243,7 +2509,7 @@ export default function App() {
               )}
               {!viewPlanWeek&&(
                 <>
-                  <div style={{background:"linear-gradient(160deg,#071013,#0D1A1E,#0D1A1E)",backgroundSize:"300% 300%",animation:"gradShift 10s ease infinite",borderRadius:26,padding:"24px 22px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden"}}>
+                  <div style={{background:"linear-gradient(160deg,#10171C,#121A1E,#121A1E)",backgroundSize:"300% 300%",animation:"gradShift 10s ease infinite",borderRadius:26,padding:"24px 22px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden"}}>
                     <div style={{position:"absolute",top:-40,right:-40,width:200,height:200,background:"radial-gradient(circle,rgba(96,165,250,0.15),transparent 70%)"}}/>
                     <div style={{position:"relative",zIndex:1}}>
                       <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.16em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>
@@ -2270,7 +2536,7 @@ export default function App() {
                   <textarea className="journal-input" rows={2} placeholder={"What didn't get done but still needs to?"} value={weekPlan.carryForward||""} onChange={e=>saveWeekPlan({...weekPlan,carryForward:e.target.value})} style={{marginBottom:14}}/>
                   <div className="vision-card">
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                      <div style={{fontSize:14,fontWeight:700,color:"#2563EB"}}>Vision Anchor</div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#35617E"}}>Vision Anchor</div>
                       {!editingVision&&<button onClick={startEditVision} style={{background:"none",border:"none",color:"#94A3B8",fontSize:12,fontWeight:700,cursor:"pointer"}}>Edit</button>}
                     </div>
                     {editingVision?(
@@ -2279,7 +2545,7 @@ export default function App() {
                         <div className="btn-row"><button className="btn-s" onClick={()=>setEditingVision(false)}>Cancel</button><button className="btn-p" onClick={saveVision}>Save</button></div>
                       </>
                     ):(
-                      <div style={{fontSize:13,color:"#2A4050",lineHeight:1.7}}>{visionAnchor}</div>
+                      <div style={{fontSize:13,color:"#2C3A44",lineHeight:1.7}}>{visionAnchor}</div>
                     )}
                   </div>
                 </>
@@ -2294,7 +2560,7 @@ export default function App() {
               <div style={{background:"rgba(255,255,255,0.42)",backdropFilter:"blur(24px)",border:"1px solid rgba(255,255,255,0.6)",borderRadius:20,padding:18,marginTop:4,marginBottom:14,boxShadow:"0 2px 16px rgba(11,25,41,0.05)"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
                   <button onClick={()=>setJMonth(p=>{const d=new Date(p.y,p.m-2,1);return{y:d.getFullYear(),m:d.getMonth()+1};})} style={{background:"none",border:"none",fontSize:20,color:"#64748B",cursor:"pointer",padding:"4px 10px"}}>‹</button>
-                  <div style={{fontSize:16,fontWeight:800,color:"#0B1929"}}>{new Date(jMonth.y,jMonth.m-1,1).toLocaleDateString("en-US",{month:"long",year:"numeric"})}</div>
+                  <div style={{fontSize:16,fontWeight:800,color:"#121A20"}}>{new Date(jMonth.y,jMonth.m-1,1).toLocaleDateString("en-US",{month:"long",year:"numeric"})}</div>
                   <button onClick={()=>setJMonth(p=>{const d=new Date(p.y,p.m,1);return{y:d.getFullYear(),m:d.getMonth()+1};})} style={{background:"none",border:"none",fontSize:20,color:"#64748B",cursor:"pointer",padding:"4px 10px"}}>›</button>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>
@@ -2310,7 +2576,7 @@ export default function App() {
                     const isToday=ds===today; const isViewing=jViewDate===ds; const isFuture=ds>today;
                     return(
                       <div key={ds} className={`jcal-cell ${hasEntry?"has-entry":""} ${isToday&&!hasEntry?"today-cell":""} ${isFuture?"future":""}`}
-                        style={{background:hasEntry?"linear-gradient(135deg,#1A3A6B,#2563EB)":isToday?"transparent":"rgba(255,255,255,0.3)",color:hasEntry?"#fff":isToday?"#2563EB":"#64748B",border:isToday&&!hasEntry?"2px solid #2563EB":isViewing&&!hasEntry?"2px solid #F59E0B":"none",boxShadow:isViewing?"0 0 0 2px #F59E0B":"none"}}
+                        style={{background:hasEntry?"linear-gradient(135deg,#1A3A6B,#35617E)":isToday?"transparent":"rgba(255,255,255,0.3)",color:hasEntry?"#fff":isToday?"#35617E":"#64748B",border:isToday&&!hasEntry?"2px solid #35617E":isViewing&&!hasEntry?"2px solid #F59E0B":"none",boxShadow:isViewing?"0 0 0 2px #F59E0B":"none"}}
                         onClick={()=>{if(!isFuture)setJViewDate(ds===jViewDate?null:ds);}}>
                         {day}
                       </div>
@@ -2323,7 +2589,7 @@ export default function App() {
               {jViewDate&&jViewDate!==today?(
                 <>
                   <div style={{background:"rgba(255,255,255,0.55)",backdropFilter:"blur(16px)",border:"1px solid rgba(255,255,255,0.65)",borderRadius:18,padding:20,marginBottom:12,boxShadow:"0 2px 16px rgba(11,25,41,0.05)"}}>
-                    <div style={{fontSize:22,fontWeight:800,color:"#0B1929",letterSpacing:"-0.02em",marginBottom:2}}>{new Date(jViewDate+"T12:00:00").toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:"#121A20",letterSpacing:"-0.02em",marginBottom:2}}>{new Date(jViewDate+"T12:00:00").toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
                     <div style={{fontSize:12,fontWeight:600,color:"#64748B",marginBottom:16}}>{new Date(jViewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long"})}</div>
                     {journal[jViewDate]?.trim()
                       ?<div style={{fontSize:15,lineHeight:1.75,color:"#334155",whiteSpace:"pre-wrap"}}>{journal[jViewDate]}</div>
@@ -2335,8 +2601,8 @@ export default function App() {
               ):(
                 <>
                   <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:16,padding:18,marginBottom:14,boxShadow:"0 2px 12px rgba(7,16,19,0.05)"}}>
-                    <div style={{fontSize:10,fontWeight:800,color:"#23B5D3",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>A question for today</div>
-                    <div style={{fontSize:17,fontWeight:700,color:"#0B1929",lineHeight:1.4,marginBottom:6}}>{getDailyJournalPrompt()}</div>
+                    <div style={{fontSize:10,fontWeight:800,color:"#2B5F7D",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>A question for today</div>
+                    <div style={{fontSize:17,fontWeight:700,color:"#121A20",lineHeight:1.4,marginBottom:6}}>{getDailyJournalPrompt()}</div>
                     <div style={{fontSize:12,color:"#94A3B8",fontStyle:"italic"}}>Let the answer be smaller than you think.</div>
                   </div>
                   <div className="sec"><div className="sec-title">Today's Reflection</div><div className="sec-sub">{new Date().toLocaleDateString("en-US",{weekday:"long"})}</div></div>
@@ -2349,7 +2615,7 @@ export default function App() {
                         return(
                           <div key={d} style={{background:"rgba(255,255,255,0.45)",backdropFilter:"blur(16px)",border:"1px solid rgba(255,255,255,0.6)",borderRadius:16,padding:"16px 18px",marginBottom:10,boxShadow:"0 2px 12px rgba(11,25,41,0.05)",cursor:"pointer"}}
                             onClick={()=>{setJMonth({y:dt.getFullYear(),m:dt.getMonth()+1});setJViewDate(d);}}>
-                            <div style={{fontSize:13,fontWeight:800,color:"#2563EB",marginBottom:4}}>{dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+                            <div style={{fontSize:13,fontWeight:800,color:"#35617E",marginBottom:4}}>{dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
                             <div style={{fontSize:13,color:"#64748B",lineHeight:1.55,fontStyle:"italic"}}>{t.length>160?t.slice(0,160)+"…":t}</div>
                           </div>
                         );
@@ -2370,7 +2636,7 @@ export default function App() {
                   ):(
                     <div className="tenet-row" key={v.n} onClick={()=>startEditValue(i)} style={{cursor:"pointer"}}>
                       <div className="tenet-s">{v.n.slice(0,1)}</div>
-                      <div><div style={{fontSize:15,fontWeight:700,color:"#0B1929",marginBottom:2}}>{v.n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{v.d}</div></div>
+                      <div><div style={{fontSize:15,fontWeight:700,color:"#121A20",marginBottom:2}}>{v.n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{v.d}</div></div>
                     </div>
                   )
                 ))}
@@ -2382,7 +2648,7 @@ export default function App() {
           {tab==="progress"&&progressSubTab==="health"&&(
             <>
               {/* PROTEIN HERO */}
-              <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
+              <div style={{background:"linear-gradient(145deg,#10171C,#121C24,#14262F)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,marginTop:4,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
                 <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
                 <div style={{position:"absolute",top:-40,right:-30,width:160,height:160,background:"radial-gradient(circle,rgba(35,181,211,0.1),transparent 70%)"}}/>
                 <div style={{position:"relative",zIndex:1}}>
@@ -2392,7 +2658,7 @@ export default function App() {
                     <div style={{position:"relative",width:80,height:80,flexShrink:0}}>
                       <svg viewBox="0 0 80 80" style={{transform:"rotate(-90deg)"}}>
                         <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="7"/>
-                        <circle cx="40" cy="40" r="34" fill="none" stroke="#23B5D3" strokeWidth="7"
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="#2B5F7D" strokeWidth="7"
                           strokeDasharray={`${Math.min(todayProtein/proteinTarget,1)*213.6} 213.6`}
                           strokeLinecap="round"/>
                       </svg>
@@ -2404,12 +2670,12 @@ export default function App() {
                     <div>
                       <div style={{fontSize:32,fontWeight:900,color:"#FFFFFF",letterSpacing:"-0.03em",lineHeight:1}}>{Math.round((todayProtein/proteinTarget)*100)}%</div>
                       <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:4}}>{proteinTarget-todayProtein>0?`${proteinTarget-todayProtein}g to go`:"Target hit ✓"}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#23B5D3",marginTop:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>{proteinLog.length} entries today</div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#2B5F7D",marginTop:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>{proteinLog.length} entries today</div>
                     </div>
                   </div>
                   {/* Progress bar */}
                   <div style={{height:2,background:"rgba(255,255,255,0.1)",borderRadius:0,overflow:"hidden"}}>
-                    <div style={{height:"100%",background:"linear-gradient(90deg,#23B5D3,#75ABBC)",width:`${Math.min((todayProtein/proteinTarget)*100,100)}%`,transition:"width 0.6s"}}/>
+                    <div style={{height:"100%",background:"linear-gradient(90deg,#2B5F7D,#6B8494)",width:`${Math.min((todayProtein/proteinTarget)*100,100)}%`,transition:"width 0.6s"}}/>
                   </div>
                 </div>
               </div>
@@ -2420,61 +2686,61 @@ export default function App() {
                 {PROTEIN_PRESETS.filter(p=>p.grams>0).map(p=>(
                   <button key={p.label} onClick={()=>logProtein(p)} style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.15)",borderRadius:12,padding:"12px 8px",cursor:"pointer",transition:"all 0.15s",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",textAlign:"center"}}>
                     <div style={{fontSize:22,marginBottom:4}}>{p.icon}</div>
-                    <div style={{fontSize:12,fontWeight:700,color:"#071013",lineHeight:1.2,marginBottom:2}}>{p.label}</div>
-                    <div style={{fontSize:12,fontWeight:800,color:"#23B5D3"}}>{p.grams}g</div>
+                    <div style={{fontSize:12,fontWeight:700,color:"#10171C",lineHeight:1.2,marginBottom:2}}>{p.label}</div>
+                    <div style={{fontSize:12,fontWeight:800,color:"#2B5F7D"}}>{p.grams}g</div>
                   </button>
                 ))}
-                <button onClick={()=>setShowCustom(p=>!p)} style={{background:showCustom?"#EAF7FB":"#FFFFFF",border:`1.5px ${showCustom?"solid #23B5D3":"solid rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"12px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)"}}>
+                <button onClick={()=>setShowCustom(p=>!p)} style={{background:showCustom?"#EDF1F3":"#FFFFFF",border:`1.5px ${showCustom?"solid #2B5F7D":"solid rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"12px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)"}}>
                   <div style={{fontSize:22,marginBottom:4}}>✏️</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#071013",marginBottom:2}}>Custom</div>
-                  <div style={{fontSize:11,color:"#A2AEBB"}}>any amount</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#10171C",marginBottom:2}}>Custom</div>
+                  <div style={{fontSize:11,color:"#8B99A3"}}>any amount</div>
                 </button>
               </div>
 
               {/* CUSTOM INPUT */}
               {showCustom&&(
-                <div style={{background:"#FFFFFF",border:"1.5px solid #23B5D3",borderRadius:12,padding:"14px 16px",marginBottom:12,display:"flex",gap:10,alignItems:"center",boxShadow:"0 0 0 3px rgba(35,181,211,0.1)"}}>
+                <div style={{background:"#FFFFFF",border:"1.5px solid #2B5F7D",borderRadius:12,padding:"14px 16px",marginBottom:12,display:"flex",gap:10,alignItems:"center",boxShadow:"0 0 0 3px rgba(35,181,211,0.1)"}}>
                   <input
                     type="number" placeholder="Enter grams…"
                     value={customGrams} onChange={e=>setCustomGrams(e.target.value)}
                     onKeyDown={e=>e.key==="Enter"&&logCustomProtein()}
-                    style={{flex:1,border:"none",outline:"none",fontSize:17,fontWeight:700,color:"#071013",background:"transparent"}}
+                    style={{flex:1,border:"none",outline:"none",fontSize:17,fontWeight:700,color:"#10171C",background:"transparent"}}
                     autoFocus
                   />
-                  <span style={{fontSize:14,fontWeight:700,color:"#A2AEBB"}}>g</span>
-                  <button onClick={logCustomProtein} style={{background:"#23B5D3",border:"none",borderRadius:8,padding:"9px 16px",color:"#FFFFFF",fontSize:13,fontWeight:800,cursor:"pointer"}}>Add</button>
-                  <button onClick={()=>{setShowCustom(false);setCustomGrams("");}} style={{background:"none",border:"none",color:"#A2AEBB",fontSize:18,cursor:"pointer"}}>✕</button>
+                  <span style={{fontSize:14,fontWeight:700,color:"#8B99A3"}}>g</span>
+                  <button onClick={logCustomProtein} style={{background:"#2B5F7D",border:"none",borderRadius:8,padding:"9px 16px",color:"#FFFFFF",fontSize:13,fontWeight:800,cursor:"pointer"}}>Add</button>
+                  <button onClick={()=>{setShowCustom(false);setCustomGrams("");}} style={{background:"none",border:"none",color:"#8B99A3",fontSize:18,cursor:"pointer"}}>✕</button>
                 </div>
               )}
 
               {/* TODAY'S LOG */}
               {proteinLog.length>0&&(
                 <>
-                  <div className="sec"><div className="sec-title">Today's Log</div><button onClick={async()=>{setProteinLog([]);await save(`wb-protein-${todayKey()}`,[]);}} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#A2AEBB",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>Clear all</button></div>
+                  <div className="sec"><div className="sec-title">Today's Log</div><button onClick={async()=>{setProteinLog([]);await save(`wb-protein-${todayKey()}`,[]);}} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#8B99A3",cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase"}}>Clear all</button></div>
                   <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,overflow:"hidden",marginBottom:16,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
                     {proteinLog.map((e,i)=>(
                       <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<proteinLog.length-1?"1px solid rgba(35,181,211,0.07)":"none"}}>
-                        <div style={{width:36,height:36,borderRadius:8,background:"#EAF7FB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                        <div style={{width:36,height:36,borderRadius:8,background:"#EDF1F3",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
                           {PROTEIN_PRESETS.find(p=>p.label===e.label)?.icon||"🍽️"}
                         </div>
                         <div style={{flex:1}}>
-                          <div style={{fontSize:14,fontWeight:600,color:"#071013"}}>{e.label}</div>
-                          <div style={{fontSize:11,color:"#A2AEBB",marginTop:1}}>{new Date(e.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+                          <div style={{fontSize:14,fontWeight:600,color:"#10171C"}}>{e.label}</div>
+                          <div style={{fontSize:11,color:"#8B99A3",marginTop:1}}>{new Date(e.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
                         </div>
-                        <div style={{fontSize:15,fontWeight:800,color:"#23B5D3",marginRight:4}}>{e.grams}g</div>
-                        <button onClick={()=>deleteProteinEntry(e.id)} style={{background:"none",border:"none",color:"#DFE0E2",fontSize:18,cursor:"pointer",padding:"2px 4px",lineHeight:1}}>×</button>
+                        <div style={{fontSize:15,fontWeight:800,color:"#2B5F7D",marginRight:4}}>{e.grams}g</div>
+                        <button onClick={()=>deleteProteinEntry(e.id)} style={{background:"none",border:"none",color:"#DCE2E6",fontSize:18,cursor:"pointer",padding:"2px 4px",lineHeight:1}}>×</button>
                       </div>
                     ))}
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:"rgba(35,181,211,0.04)",borderTop:"1px solid rgba(35,181,211,0.1)"}}>
-                      <div style={{fontSize:12,fontWeight:800,color:"#4A7080",letterSpacing:"0.08em",textTransform:"uppercase"}}>Total Today</div>
-                      <div style={{fontSize:18,fontWeight:900,color:"#23B5D3"}}>{todayProtein}g <span style={{fontSize:12,color:"#A2AEBB",fontWeight:600}}>/ {proteinTarget}g</span></div>
+                      <div style={{fontSize:12,fontWeight:800,color:"#3E525E",letterSpacing:"0.08em",textTransform:"uppercase"}}>Total Today</div>
+                      <div style={{fontSize:18,fontWeight:900,color:"#2B5F7D"}}>{todayProtein}g <span style={{fontSize:12,color:"#8B99A3",fontWeight:600}}>/ {proteinTarget}g</span></div>
                     </div>
                   </div>
                 </>
               )}
 
               {/* WORKOUT SECTION */}
-              <div style={{background:"linear-gradient(145deg,#071013,#0D2030,#0F2D3A)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
+              <div style={{background:"linear-gradient(145deg,#10171C,#121C24,#14262F)",borderRadius:20,padding:"22px 20px 20px",marginBottom:12,position:"relative",overflow:"hidden",boxShadow:"0 8px 32px rgba(7,16,19,0.15)"}}>
                 <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(35,181,211,0.5),transparent)"}}/>
                 <div style={{position:"relative",zIndex:1}}>
                   <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>This Week</div>
@@ -2483,7 +2749,7 @@ export default function App() {
                     <div style={{fontSize:14,color:"rgba(255,255,255,0.4)"}}>of 3 workouts</div>
                   </div>
                   <div style={{height:2,background:"rgba(255,255,255,0.1)",marginBottom:16,overflow:"hidden"}}>
-                    <div style={{height:"100%",background:"linear-gradient(90deg,#23B5D3,#75ABBC)",width:`${Math.min((Object.keys(workoutLog).length/3)*100,100)}%`,transition:"width 0.6s"}}/>
+                    <div style={{height:"100%",background:"linear-gradient(90deg,#2B5F7D,#6B8494)",width:`${Math.min((Object.keys(workoutLog).length/3)*100,100)}%`,transition:"width 0.6s"}}/>
                   </div>
                   {/* Weekly grid */}
                   <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
@@ -2503,8 +2769,8 @@ export default function App() {
                             onClick={()=>{if(done)removeWorkout(dk);else logWorkout(dk,"Lift");}}
                             style={{
                               width:"100%",aspectRatio:"1",borderRadius:6,
-                              background:done?"#23B5D3":isToday?"rgba(35,181,211,0.15)":"rgba(255,255,255,0.06)",
-                              border:`1px solid ${done?"#23B5D3":isToday?"rgba(35,181,211,0.4)":"rgba(255,255,255,0.1)"}`,
+                              background:done?"#2B5F7D":isToday?"rgba(35,181,211,0.15)":"rgba(255,255,255,0.06)",
+                              border:`1px solid ${done?"#2B5F7D":isToday?"rgba(35,181,211,0.4)":"rgba(255,255,255,0.1)"}`,
                               display:"flex",alignItems:"center",justifyContent:"center",
                               cursor:"pointer",transition:"all 0.15s",fontSize:10,
                             }}>
@@ -2526,10 +2792,10 @@ export default function App() {
                   const isLogged = todayDone?.type===type;
                   return(
                     <button key={type} onClick={()=>isLogged?removeWorkout(todayKey()):logWorkout(todayKey(),type)}
-                      style={{background:isLogged?"#EAF7FB":"#FFFFFF",border:`1.5px solid ${isLogged?"#23B5D3":"rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"14px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",transition:"all 0.15s"}}>
+                      style={{background:isLogged?"#EDF1F3":"#FFFFFF",border:`1.5px solid ${isLogged?"#2B5F7D":"rgba(35,181,211,0.15)"}`,borderRadius:12,padding:"14px 8px",cursor:"pointer",textAlign:"center",boxShadow:"0 2px 8px rgba(7,16,19,0.05)",transition:"all 0.15s"}}>
                       <div style={{fontSize:24,marginBottom:4}}>{icons[type]}</div>
-                      <div style={{fontSize:12,fontWeight:700,color:isLogged?"#0D6B85":"#071013"}}>{type}</div>
-                      {isLogged&&<div style={{fontSize:9,fontWeight:800,color:"#23B5D3",marginTop:2,letterSpacing:"0.08em"}}>DONE ✓</div>}
+                      <div style={{fontSize:12,fontWeight:700,color:isLogged?"#17384A":"#10171C"}}>{type}</div>
+                      {isLogged&&<div style={{fontSize:9,fontWeight:800,color:"#2B5F7D",marginTop:2,letterSpacing:"0.08em"}}>DONE ✓</div>}
                     </button>
                   );
                 })}
@@ -2538,21 +2804,21 @@ export default function App() {
               {/* MINIMUM PROTOCOL */}
               <div className="sec"><div className="sec-title">The Protocol</div><div className="sec-sub">When time is short</div></div>
               <div style={{background:"#FFFFFF",border:"1px solid rgba(35,181,211,0.12)",borderRadius:14,padding:18,marginBottom:12,boxShadow:"0 2px 10px rgba(7,16,19,0.05)"}}>
-                <div style={{fontSize:13,fontWeight:800,color:"#23B5D3",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>12-Minute Minimum</div>
-                <div style={{fontSize:12,color:"#4A7080",lineHeight:1.7,marginBottom:12}}>When the day closes in, this is non-negotiable. 12 minutes. No equipment. Gets it done.</div>
+                <div style={{fontSize:13,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>12-Minute Minimum</div>
+                <div style={{fontSize:12,color:"#3E525E",lineHeight:1.7,marginBottom:12}}>When the day closes in, this is non-negotiable. 12 minutes. No equipment. Gets it done.</div>
                 {[["0:00–3:00","5 push-ups, 5 squats, 5 hip hinges × 3 sets. No rest. Get the blood moving."],["3:00–7:00","10 push-ups, 10 lunges (each leg), 10 pike push-ups. One set each."],["7:00–10:00","Max push-ups, max bodyweight squats, 30-sec plank. One round."],["10:00–12:00","Dead hang or doorframe pull-up hold. Finish with 10 slow deep breaths."]].map(([t,d])=>(
                   <div key={t} style={{display:"flex",gap:12,paddingBottom:10,marginBottom:10,borderBottom:"1px solid rgba(35,181,211,0.07)"}}>
-                    <div style={{fontSize:10,fontWeight:800,color:"#23B5D3",letterSpacing:"0.06em",width:56,flexShrink:0,paddingTop:2}}>{t}</div>
-                    <div style={{fontSize:13,color:"#071013",lineHeight:1.6}}>{d}</div>
+                    <div style={{fontSize:10,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.06em",width:56,flexShrink:0,paddingTop:2}}>{t}</div>
+                    <div style={{fontSize:13,color:"#10171C",lineHeight:1.6}}>{d}</div>
                   </div>
                 ))}
-                <div style={{fontSize:11,fontWeight:700,color:"#7A9AAA",fontStyle:"italic",marginTop:4}}>Done is better than perfect. Log it. Streak protected.</div>
+                <div style={{fontSize:11,fontWeight:700,color:"#6E7F8A",fontStyle:"italic",marginTop:4}}>Done is better than perfect. Log it. Streak protected.</div>
               </div>
 
               {/* WEEKLY CONSISTENCY TIP */}
-              <div style={{background:"#EAF7FB",border:"1px solid rgba(35,181,211,0.2)",borderRadius:14,padding:16,marginBottom:12}}>
-                <div style={{fontSize:12,fontWeight:800,color:"#0D6B85",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>The Real Fix</div>
-                <div style={{fontSize:13,color:"#2A4050",lineHeight:1.7}}>The workout isn't the problem — the schedule is. Block 6:00–6:30am in your calendar as immovable. Before the day exists. Before email. Before anyone needs anything from you. Everything else is a negotiation. This block isn't.</div>
+              <div style={{background:"#EDF1F3",border:"1px solid rgba(35,181,211,0.2)",borderRadius:14,padding:16,marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:800,color:"#17384A",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>The Real Fix</div>
+                <div style={{fontSize:13,color:"#2C3A44",lineHeight:1.7}}>The workout isn't the problem — the schedule is. Block 6:00–6:30am in your calendar as immovable. Before the day exists. Before email. Before anyone needs anything from you. Everything else is a negotiation. This block isn't.</div>
               </div>
             </>
           )}
