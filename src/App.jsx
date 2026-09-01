@@ -803,7 +803,13 @@ button.c-row,button.prompt-card,button.day-chip,button.tenet-row{
 }
 button.c-row{background:transparent;border:none;border-bottom:1px solid rgba(35,181,211,0.06);cursor:pointer;}
 button.c-row:last-child{border-bottom:none;}
-button.day-chip{width:auto;cursor:pointer;}
+button.day-chip{
+  width:auto;cursor:pointer;
+  background:none;border:none;padding:0;margin:0;
+  -webkit-appearance:none;appearance:none;
+}
+button.day-chip:focus-visible{outline:none;}
+button.day-chip:focus-visible .day-chip-inner{outline:2px solid #2B5F7D;outline-offset:1px;}
 .cat-toggle{background:none;border:none;padding:0;margin:0;display:flex;align-items:center;cursor:pointer;}
 .cat-header-name:focus-visible{outline-offset:1px;}
 
