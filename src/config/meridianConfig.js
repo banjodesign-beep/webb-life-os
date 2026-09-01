@@ -12,7 +12,22 @@ export const STAKES_STREAKS = ["main", "health"];
 
 export const GRACE_TOKENS_PER_WEEK = 1;
 
+// Hard ceiling on the shared grace pool. Without this the balance grows
+// without bound, and because resolveStreakAdvance spends one token per
+// missed day, a long enough accrual makes any absence survivable — which
+// voids the mechanic entirely. Four is what the UI has always claimed.
+export const GRACE_TOKEN_CAP = 4;
+
 export const MILESTONE_BONUS_XP = { minor: 25, major: 50 };
+
+// Award values live here so the award path and the reversal path can never
+// drift apart. Every one of these was previously a bare literal at the award
+// site with no matching subtraction anywhere.
+export const KEYSTONE_XP = 40;
+export const ARC_STEP_XP = 25;
+export const ARC_COMPLETE_XP = 150;
+export const GOAL_XP = 100;
+export const WORKOUT_XP = 20;
 
 const MILESTONE_INTERVAL_DAYS = 30;
 const NAMED_MAJOR_MILESTONES = [90, 180, 300, 365];

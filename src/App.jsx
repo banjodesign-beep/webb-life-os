@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { load, save } from "./lib/supabase.js";
+import { load, save, hasLocalSnapshot, isDegraded, subscribeSync, retrySync, flushPending } from "./lib/supabase.js";
 import { resolveStreakAdvance, checkMilestone, accrueGraceToken } from "./lib/streakEngine.js";
-import { CATEGORY_LABELS, GRACE_TOKENS_PER_WEEK, MILESTONE_BONUS_XP, generateMilestoneList } from "./config/meridianConfig.js";
+import { CATEGORY_LABELS, GRACE_TOKENS_PER_WEEK, GRACE_TOKEN_CAP, MILESTONE_BONUS_XP, generateMilestoneList,
+         KEYSTONE_XP, ARC_STEP_XP, ARC_COMPLETE_XP, GOAL_XP, WORKOUT_XP } from "./config/meridianConfig.js";
 import MilestoneJourney from "./components/MilestoneJourney.jsx";
 import MilestoneSplash from "./components/MilestoneSplash.jsx";
 import { pickKeystone, pickSabbathInvitation } from "./config/keystoneLibrary.js";
-import { DEFAULT_ARCS, arcProgress, nextStep, isArcComplete, pickArc } from "./config/arcs.js";
+import { DEFAULT_ARCS, nextStep, isArcComplete, pickArc } from "./config/arcs.js";
 import { buildWeeklyReview } from "./lib/weeklyReview.js";
 
 // ── DATE HELPERS ──────────────────────────────────────────────────────
@@ -240,10 +241,22 @@ const ACHIEVEMENTS = [
   {id:"a9",icon:"🌍",title:"Legacy Builder",check:s=>s.totalXP>=2500},
 ];
 
-const APP_VERSION = "1.10";
+const APP_VERSION = "1.11";
+
+// ── MOTION PREFERENCE ─────────────────────────────────────────────────
+// CSS handles the declarative animations, but confetti, the XP float and
+// the boot splash are JS-driven and have to opt out themselves.
+function prefersReducedMotion(){
+  if(typeof window==="undefined"||!window.matchMedia) return false;
+  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+  catch { return false; }
+}
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {
+  // No confetti at all under reduced motion — the completion state itself
+  // is the feedback, and 50 falling elements is the opposite of subtle.
+  if(prefersReducedMotion()) return null;
   const pieces = Array.from({length:50},(_,i)=>({
     id:i,x:Math.random()*100,
     color:["#35617E","#60A5FA","#34D399","#A78BFA","#FBBF24","#F472B6"][Math.floor(Math.random()*6)],
@@ -258,8 +271,11 @@ function Confetti() {
   );
 }
 function XPFloat({amount,onDone}) {
-  useEffect(()=>{const t=setTimeout(onDone,1200);return()=>clearTimeout(t);},[]);
-  return <div style={{position:"fixed",bottom:140,right:24,fontWeight:800,fontSize:18,color:"#35617E",animation:"xpFloat 1.2s ease-out forwards",pointerEvents:"none",zIndex:500}}>+{amount} pts</div>;
+  const reduced = prefersReducedMotion();
+  useEffect(()=>{const t=setTimeout(onDone,reduced?900:1200);return()=>clearTimeout(t);},[]);
+  // Still shown when motion is reduced — the number is the information.
+  // It just sits still and fades via opacity instead of flying upward.
+  return <div role="status" aria-live="polite" style={{position:"fixed",bottom:140,right:24,fontWeight:800,fontSize:18,color:"#35617E",animation:reduced?"none":"xpFloat 1.2s ease-out forwards",opacity:reduced?0.95:undefined,pointerEvents:"none",zIndex:500}}>+{amount} pts</div>;
 }
 
 // ── APP ICON ──────────────────────────────────────────────────────────
@@ -278,6 +294,9 @@ function SplashScreen({onDone}) {
   const dateStr = today.toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric"}).split("/").join(".");
 
   useEffect(()=>{
+    // Under reduced motion the boot sequence is a 3.2s animation with no
+    // information in it — skip straight through to the app.
+    if(prefersReducedMotion()){ const t=setTimeout(onDone,150); return()=>clearTimeout(t); }
     const t1=setTimeout(()=>setPhase(1),400);
     const t2=setTimeout(()=>setPhase(2),300);
     const t3=setTimeout(()=>setPhase(3),2600);
@@ -361,7 +380,9 @@ const CheckGroup = React.memo(function CheckGroup({items,state,onToggle,bouncing
         const val=state[item.id]; const isDone=val?.checked; const isBounce=bouncing===item.id;
         const dc=travel?"done-travel":"done";
         return (
-          <div key={item.id} className="c-row" style={{animationDelay:`${idx*0.035}s`}} onClick={()=>onToggle(item.id,item,state)}>
+          <button key={item.id} type="button" role="checkbox" aria-checked={!!isDone}
+            aria-label={`${item.text}${item.sub?" — "+item.sub:""}`}
+            className="c-row" style={{animationDelay:`${idx*0.035}s`}} onClick={()=>onToggle(item.id,item,state)}>
             <div className={`c-icon-bg ${isDone?dc:""}`}>{item.icon}</div>
             <div className={`c-circle ${isDone?dc:""} ${isBounce?"bounce":""}`}/>
             <div className="c-body">
@@ -370,12 +391,42 @@ const CheckGroup = React.memo(function CheckGroup({items,state,onToggle,bouncing
               {isDone&&val.at&&<div className="c-ts">{new Date(val.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>}
             </div>
             <div className={`c-xp ${isDone?"done":travel?"travel":""}`}>{isDone?"✓":`+${item.xp}`}</div>
-          </div>
+          </button>
         );
       })}
     </div>
   );
 });
+
+// ── SYNC CHIP ─────────────────────────────────────────────────────────
+// Writes used to fail silently — save() caught the error and logged to the
+// console. This is the visible counterpart: everything is already safe
+// locally, and this says whether the server has it yet.
+function SyncChip({state,onRetry}){
+  const {status,pending} = state||{};
+  if(status==="synced") return null;               // quiet when there's nothing to say
+  const offline = status==="offline";
+  return (
+    <button
+      type="button"
+      onClick={offline?onRetry:undefined}
+      aria-live="polite"
+      title={offline
+        ? `${pending} change${pending===1?"":"s"} saved on this device, waiting to sync. Tap to retry.`
+        : "Syncing changes"}
+      style={{
+        display:"flex",alignItems:"center",gap:5,
+        background:offline?"rgba(180,83,60,0.14)":"rgba(43,95,125,0.12)",
+        border:`1px solid ${offline?"rgba(180,83,60,0.35)":"rgba(43,95,125,0.28)"}`,
+        color:offline?"#B4533C":"#2B5F7D",
+        borderRadius:999,padding:"5px 10px",fontSize:10.5,fontWeight:800,
+        letterSpacing:"0.06em",cursor:offline?"pointer":"default",whiteSpace:"nowrap",
+      }}>
+      <span aria-hidden="true">{offline?"⚠":"⟳"}</span>
+      <span>{offline?`Saved here · ${pending}`:"Syncing"}</span>
+    </button>
+  );
+}
 
 // ── CSS ───────────────────────────────────────────────────────────────
 const CSS = `
@@ -743,6 +794,40 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 .cat-del-btn{font-size:14px;color:#8B99A3;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;}
 .cat-del-btn:hover{color:#EF4444;}
 
+/* ── Button resets ───────────────────────────────────────────────────
+   These elements were clickable divs. As real buttons they inherit UA
+   styling, so it has to be stripped for them to look unchanged. */
+button.c-row,button.prompt-card,button.day-chip,button.tenet-row{
+  width:100%;font:inherit;color:inherit;text-align:left;
+  -webkit-appearance:none;appearance:none;
+}
+button.c-row{background:transparent;border:none;border-bottom:1px solid rgba(35,181,211,0.06);cursor:pointer;}
+button.c-row:last-child{border-bottom:none;}
+button.day-chip{width:auto;cursor:pointer;}
+.cat-toggle{background:none;border:none;padding:0;margin:0;display:flex;align-items:center;cursor:pointer;}
+.cat-header-name:focus-visible{outline-offset:1px;}
+
+/* ── Focus visibility ────────────────────────────────────────────────
+   Several controls were clickable divs with no focus treatment at all.
+   Now that they're real buttons they need a visible ring. */
+:focus-visible{outline:2px solid #2B5F7D;outline-offset:2px;border-radius:6px;}
+.hero :focus-visible,.milestone-splash :focus-visible{outline-color:#9FD3EC;}
+
+/* ── Reduced motion ──────────────────────────────────────────────────
+   Confetti, bounce, XP float, splash, shimmer, glow and route
+   transitions were all unconditional. Completion feedback must survive
+   with motion off, so checks and progress still change state — they
+   just stop moving. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:0.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.001ms !important;
+    scroll-behavior:auto !important;
+  }
+  .pts-num,.c-row,.c-circle.bounce{animation:none !important;}
+  .hero{background-size:100% 100% !important;}
+}
 `;
 
 
@@ -753,6 +838,8 @@ export default function App() {
   const [rhythmTab,   setRhythmTab]   = useState("weekly");
   const [loading,     setLoading]     = useState(true);
   const [loadError,   setLoadError]   = useState(false);
+  const [syncState,   setSyncState]   = useState({status:"synced",pending:0});
+  const flushJournalRef = useRef(null);
   const [toast,       setToast]       = useState(null);
   const [toastKey,    setToastKey]    = useState(0);
   const [xpFloat,     setXpFloat]     = useState(null);
@@ -811,6 +898,21 @@ export default function App() {
   const [newCatName,  setNewCatName]  = useState("");
   const [editCatId,   setEditCatId]   = useState(null);
   const [totalXP,     setTotalXP]     = useState(0);
+  // Mirror of totalXP that is always current within a single tick. Award sites
+  // used to read the `totalXP` closure, so two awards in the same tick could
+  // both compute from the same base and one would be lost. Every mutation now
+  // goes through adjustXP, which is also the single place a reversal can
+  // subtract — previously keystone, arc, goal and workout awarded on completion
+  // and refunded nothing on undo, so the score could be farmed by toggling.
+  const xpRef = useRef(0);
+  const adjustXP = useCallback(async (delta) => {
+    if(!delta) return xpRef.current;
+    const next = Math.max(0, (xpRef.current || 0) + delta);
+    xpRef.current = next;
+    setTotalXP(next);
+    await save("wb-totalxp", next);
+    return next;
+  }, []);
   const [streaks,     setStreaks]     = useState({current:0,longest:0,lastDate:null,totalDays:0,sabbaths:0,practiceSessions:0,friendDinners:0,tripCount:0});
   // ── Engagement layer: stakes streaks, grace tokens, rest day, lesson toggle, milestones ──
   const [healthStreak, setHealthStreak] = useState({current:0,longest:0,lastDate:null});
@@ -818,6 +920,7 @@ export default function App() {
   const [graceAccruedWeek, setGraceAccruedWeek] = useState(null);
   const [restDayToday, setRestDayToday] = useState(false);
   const [lessonThisWeek, setLessonThisWeek] = useState(false);
+  const [arcBonus,    setArcBonus]    = useState({}); // {arcId:true} — completion bonus already paid
   const [milestoneAck, setMilestoneAck] = useState({main:0,health:0}); // highest milestone day already shown
   const [milestoneQueue, setMilestoneQueue] = useState([]); // pending splash celebrations
   const [progressSubTab, setProgressSubTab] = useState("stats"); // stats | rhythms | platform | health
@@ -877,6 +980,8 @@ export default function App() {
   // ── LOAD ─────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
       setLoadError(false);
+      // Captured before anything can write, so it reflects the state at boot.
+      const hadSnapshot = hasLocalSnapshot();
       const today = todayKey();
       const mode  = getModeForDate(today);
       const dkey  = getDayKey(today, mode);
@@ -897,12 +1002,21 @@ export default function App() {
           timeout,
         ]);
         const [ds,ws,ms,as,ij,plt,g,fl,fin,xp,s,ach,tl,tm,dest,jrnl,wp,pa,tod,cl,hist] = results;
+
+        // Cold start with no network AND no cache: nothing real was read.
+        // Bail out before applying or writing anything. If we rendered
+        // defaults here, the weekly grace accrual and arc snapshot below
+        // would queue those defaults and overwrite live server data the
+        // moment the connection came back.
+        if(isDegraded() && !hadSnapshot){
+          setLoadError(true); setLoading(false); return;
+        }
         if(ds)  setDayStates(p=>({...p,[dkey]:ds}));
         if(ws)  setWeeklyState(ws); if(ms)  setMonthlyState(ms);
         if(as)  setAnnualState(as); if(ij)  setIjmState(ij);
         if(plt) setPlatState(plt);  if(g)   setGoals(g);
         if(fl) setFriendLog(fl);
-        if(fin) setFinancials(fin); if(xp)  setTotalXP(xp);
+        if(fin) setFinancials(fin); if(xp!==null&&xp!==undefined){ setTotalXP(xp); xpRef.current = xp; }
         if(s)   setStreaks(s);      if(ach) setUnlockedAch(ach);
         if(tl)  setTripLog(tl);    if(tm)  setTravelMode(tm);
         if(dest)setTravelDest(dest);
@@ -967,6 +1081,7 @@ export default function App() {
         if(cats && cats.length>0) setCategories(cats);
 
         // ── Engagement layer ──
+        const ab = await load("wb-arc-bonus-v1"); if(ab) setArcBonus(ab);
         const hs = await load("wb-health-streak"); if(hs) setHealthStreak(hs);
         const mAck = await load("wb-milestone-ack"); if(mAck) setMilestoneAck(mAck);
         const restDay = await load(`wb-restday-${today}`); if(restDay) setRestDayToday(true);
@@ -988,12 +1103,28 @@ export default function App() {
         setLoading(false);
       } catch(e){
         console.error("Load error:",e);
-        setLoadError(true);
+        // Showing the user their day matters more than proving the server is
+        // reachable. If anything has ever been cached locally, render it and
+        // reconcile in the background; the sync chip says we are offline.
+        // The hard error screen is only for a genuine cold start with no data.
+        if(hasLocalSnapshot()) setLoadError(false);
+        else setLoadError(true);
         setLoading(false);
       }
   }, []);
 
   useEffect(()=>{ loadAll(); },[loadAll]);
+
+  // Sync status feed from the write queue.
+  useEffect(()=>subscribeSync((status,pending)=>setSyncState({status,pending})),[]);
+
+  // Flush anything queued before the tab goes away or the user switches tabs.
+  useEffect(()=>{
+    const onHide=()=>{ flushJournalRef.current?.(); flushPending(); };
+    window.addEventListener("pagehide",onHide);
+    document.addEventListener("visibilitychange",onHide);
+    return ()=>{ window.removeEventListener("pagehide",onHide); document.removeEventListener("visibilitychange",onHide); };
+  },[]);
 
   // ── DERIVED STATE ────────────────────────────────────────────────────
   const today     = todayKey();
@@ -1159,8 +1290,7 @@ export default function App() {
     await save(key,ns);
     const items = lists[modeForOp]||lists.weekday;
     await writeHistory(dateForOp,ns,items);
-    const nxp = Math.max(0,totalXP+(nowChecked?item.xp:-item.xp));
-    setTotalXP(nxp); await save("wb-totalxp",nxp);
+    const nxp = await adjustXP(nowChecked ? item.xp : -item.xp);
     if(nowChecked){setBouncing(itemId);setTimeout(()=>setBouncing(null),450);setXpFloat(item.xp);setTimeout(()=>setXpFloat(null),1300);}
     // Stakes streaks — core tasks only (bonus tasks never gate a streak).
     // Only evaluated for today, not past-day edits.
@@ -1179,7 +1309,7 @@ export default function App() {
         const nst = {...streaks,...mainAdvance.streak,totalDays:(streaks.totalDays||0)+1,sabbaths:(streaks.sabbaths||0)+sabbBonus};
         setStreaks(nst); await save("wb-streaks-v4",nst);
         const bonus = 50 + mainAdvance.streak.current*10;
-        runningXP = runningXP + bonus; setTotalXP(runningXP); await save("wb-totalxp",runningXP);
+        runningXP = await adjustXP(bonus);
         showToast(`${mainAdvance.streak.current>1?`🔥 ${mainAdvance.streak.current}-day streak!`:"🏆 Day complete!"} +${bonus} bonus pts`);
         const ms = checkMilestone(streaks.current, mainAdvance.streak.current, milestoneAck.main);
         if(ms) newMilestones.push({...ms,streakId:"main",streakLabel:"Main streak"});
@@ -1238,7 +1368,7 @@ export default function App() {
     const cur=stateRef[itemId]; const nowChecked=!cur?.checked;
     const ns={...stateRef,[itemId]:{checked:nowChecked,at:new Date().toISOString()}};
     stateSetter(ns); await save(saveKey,ns);
-    const nxp=Math.max(0,totalXP+(nowChecked?item.xp:-item.xp)); setTotalXP(nxp); await save("wb-totalxp",nxp);
+    await adjustXP(nowChecked ? item.xp : -item.xp);
     if(nowChecked){setBouncing(itemId);setTimeout(()=>setBouncing(null),450);setXpFloat(item.xp);setTimeout(()=>setXpFloat(null),1300);}
   },[totalXP]);
 
@@ -1377,6 +1507,34 @@ export default function App() {
   };
 
   // ── JOURNAL ──────────────────────────────────────────────────────────
+  // Journal used to upsert the entire year's object on every keystroke.
+  // Now: local state updates immediately, persistence is debounced, and the
+  // pending write is flushed on blur, tab change and page hide so nothing is
+  // lost. journalDirtyRef holds the text that has not reached save() yet.
+  const journalTimer = useRef(null);
+  const journalDirtyRef = useRef(null);
+
+  const flushJournal = useCallback(async ()=>{
+    if(journalTimer.current){ clearTimeout(journalTimer.current); journalTimer.current=null; }
+    const text = journalDirtyRef.current;
+    if(text===null||text===undefined) return;
+    journalDirtyRef.current = null;
+    setJournal(prev=>{
+      const upd={...prev,[today]:text};
+      save(`wb-journal-${yearKey()}`,upd);
+      return upd;
+    });
+  },[today]);
+
+  flushJournalRef.current = flushJournal;
+
+  const onJournalChange=(text)=>{
+    setJournalInput(text);
+    journalDirtyRef.current = text;
+    if(journalTimer.current) clearTimeout(journalTimer.current);
+    journalTimer.current = setTimeout(()=>{ flushJournal(); }, 800);
+  };
+
   const saveJournalEntry=async(text)=>{
     setJournalInput(text);
     const upd={...journal,[today]:text};setJournal(upd);await save(`wb-journal-${yearKey()}`,upd);
@@ -1396,9 +1554,14 @@ export default function App() {
       const nextRecent = [keystoneItem.id, ...recentKeystones].slice(0,20);
       setRecentKeystones(nextRecent);
       await save("wb-keystone-recent", nextRecent);
-      const nxp = totalXP + 40;
-      setTotalXP(nxp); await save("wb-totalxp", nxp);
+      await adjustXP(KEYSTONE_XP);
       showToast("✦ Keystone done. +40 pts");
+    } else {
+      // Undoing has to give the points back, or the keystone can be farmed
+      // by ticking and unticking. Recency history is left alone deliberately:
+      // the prompt was surfaced, so it should still cool down.
+      await adjustXP(-KEYSTONE_XP);
+      showToast("Keystone reopened. −40 pts");
     }
   };
   const skipKeystone=()=>setKeystoneSkip(s=>s+1);
@@ -1411,21 +1574,40 @@ export default function App() {
     setArcs(u); await save("wb-arcs-v1", u);
     const arc = u.find(a=>a.id===arcId);
     const step = (arc?.steps||[]).find(s=>s.id===stepId);
-    if(step?.done){
-      const nxp = totalXP + 25;
-      setTotalXP(nxp); await save("wb-totalxp", nxp);
-      if(isArcComplete(arc)){
-        const bonus = nxp + 150;
-        setTotalXP(bonus); await save("wb-totalxp", bonus);
-        showToast(`🎯 "${arc.title}" complete! +175 pts`);
-      } else {
-        showToast("Step forward. +25 pts");
-      }
+
+    // Step points mirror on undo.
+    await adjustXP(step?.done ? ARC_STEP_XP : -ARC_STEP_XP);
+
+    // The completion bonus is awarded at most once per arc, tracked
+    // separately. It used to re-fire every time any step of a finished arc
+    // was unticked and reticked.
+    const complete = isArcComplete(arc);
+    const alreadyBonused = !!arcBonus[arcId];
+    if(complete && !alreadyBonused){
+      const nb = {...arcBonus, [arcId]: true};
+      setArcBonus(nb); await save("wb-arc-bonus-v1", nb);
+      await adjustXP(ARC_COMPLETE_XP);
+      showToast(`🎯 "${arc.title}" complete! +${ARC_STEP_XP + ARC_COMPLETE_XP} pts`);
+    } else if(!complete && alreadyBonused){
+      const nb = {...arcBonus}; delete nb[arcId];
+      setArcBonus(nb); await save("wb-arc-bonus-v1", nb);
+      await adjustXP(-ARC_COMPLETE_XP);
+      showToast(`"${arc.title}" reopened. −${ARC_COMPLETE_XP} pts`);
+    } else {
+      showToast(step?.done ? `Step forward. +${ARC_STEP_XP} pts` : `Step reopened. −${ARC_STEP_XP} pts`);
     }
   };
   const cycleArc=()=>setArcOffset(o=>o+1);
 
-  const toggleGoalDone=async(id)=>{const g=goals.find(x=>x.id===id);const u=goals.map(x=>x.id===id?{...x,completed:!x.completed,progress:!x.completed?100:x.progress}:x);setGoals(u);await save("wb-goals-v5",u);if(!g.completed){const nxp=totalXP+100;setTotalXP(nxp);await save("wb-totalxp",nxp);showToast("🎯 Goal complete! +100 pts");}};
+  const toggleGoalDone=async(id)=>{
+    const g=goals.find(x=>x.id===id); if(!g) return;
+    const u=goals.map(x=>x.id===id?{...x,completed:!x.completed,progress:!x.completed?100:x.progress}:x);
+    setGoals(u); await save("wb-goals-v5",u);
+    // Reopening a goal refunds the award. Without this, complete → reopen →
+    // complete paid out every cycle.
+    if(!g.completed){ await adjustXP(GOAL_XP); showToast(`🎯 Goal complete! +${GOAL_XP} pts`); }
+    else { await adjustXP(-GOAL_XP); showToast(`Goal reopened. −${GOAL_XP} pts`); }
+  };
   const updateGoalProgress=(id,progress)=>setGoals(g=>g.map(x=>x.id===id?{...x,progress}:x));
   const saveGoalProgress=async()=>await save("wb-goals-v5",goals);
   const updateGoalNote=async(id,notes)=>{const u=goals.map(g=>g.id===id?{...g,notes}:g);setGoals(u);await save("wb-goals-v5",u);};
@@ -1487,12 +1669,17 @@ export default function App() {
   const logWorkout = async(dayKey, type) => {
     const nw = {...workoutLog, [dayKey]:{type,at:new Date().toISOString()}};
     setWorkoutLog(nw); await save(`wb-workouts-${weekKey()}`, nw);
-    const nxp=totalXP+20; setTotalXP(nxp); await save("wb-totalxp",nxp);
-    showToast(`💪 ${type} logged +20 pts`);
+    // Only award if this day did not already hold a logged workout — changing
+    // the type of an existing entry is an edit, not a new session.
+    if(!workoutLog[dayKey]) await adjustXP(WORKOUT_XP);
+    showToast(`💪 ${type} logged +${WORKOUT_XP} pts`);
   };
   const removeWorkout = async(dayKey) => {
+    const had = !!workoutLog[dayKey];
     const nw = {...workoutLog}; delete nw[dayKey];
     setWorkoutLog(nw); await save(`wb-workouts-${weekKey()}`, nw);
+    // Removing a workout has to take the points back with it.
+    if(had) await adjustXP(-WORKOUT_XP);
   };
 
   const saveCats = async(cats) => { setCategories(cats); await save("wb-categories-v1", cats); };
@@ -1615,7 +1802,7 @@ export default function App() {
           bonusXP={milestoneQueue[0].major?MILESTONE_BONUS_XP.major:MILESTONE_BONUS_XP.minor}
           onDismiss={async()=>{
             const bonus = milestoneQueue[0].major?MILESTONE_BONUS_XP.major:MILESTONE_BONUS_XP.minor;
-            const nxp = totalXP+bonus; setTotalXP(nxp); await save("wb-totalxp",nxp);
+            await adjustXP(bonus);
             dismissMilestone();
           }}
         />
@@ -1718,13 +1905,15 @@ export default function App() {
           <div className="hdr-inner">
             <div className="hdr-left">
               {/* AVATAR / APP ICON */}
-              <div style={{position:"relative",cursor:"pointer"}} onClick={()=>setShowAvatarMenu(p=>!p)}>
+              <button type="button" aria-label="Change profile photo" aria-expanded={showAvatarMenu}
+                style={{position:"relative",cursor:"pointer",background:"none",border:"none",padding:0,lineHeight:0}}
+                onClick={()=>setShowAvatarMenu(p=>!p)}>
                 {avatar
                   ? <img src={avatar} style={{width:36,height:36,borderRadius:8,objectFit:"cover",border:"1px solid rgba(35,181,211,0.3)"}} alt="You"/>
                   : <AppIcon size={36}/>
                 }
-                <div style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:"50%",background:"#2B5F7D",border:"2px solid #10171C",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#10171C",fontWeight:900}}>✎</div>
-              </div>
+                <span aria-hidden="true" style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:"50%",background:"#2B5F7D",border:"2px solid #10171C",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#10171C",fontWeight:900}}>✎</span>
+              </button>
               {/* AVATAR MENU */}
               {showAvatarMenu&&(
                 <div style={{position:"absolute",top:60,left:18,background:"#121A1E",border:"1px solid rgba(35,181,211,0.2)",borderRadius:10,padding:8,zIndex:100,boxShadow:"0 8px 32px rgba(0,0,0,0.6)",minWidth:180}}>
@@ -1740,7 +1929,8 @@ export default function App() {
               </div>
             </div>
             <div className="hdr-right">
-              <button className="gear-btn" onClick={openEditor} title="Edit checklists">⚙️</button>
+              <SyncChip state={syncState} onRetry={()=>retrySync()}/>
+              <button className="gear-btn" onClick={openEditor} title="Edit checklists" aria-label="Edit checklists">⚙️</button>
               <button className={`travel-toggle ${travelMode?"on":"off"}`} onClick={travelMode?disableTravel:()=>setShowTM(true)}>✈️ {travelMode?"Road":"Travel"}</button>
             </div>
           </div>
@@ -1753,7 +1943,7 @@ export default function App() {
             <>
               <div className={heroClass()} style={{marginTop:4}}>
                 <div style={{position:"relative",zIndex:1}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.16em",textTransform:"uppercase",color:"rgba(255,255,255,0.35)",letterSpacing:"0.14em",marginBottom:4}}>{modeIcon()} {modeLabel()}</div>
+                  <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(255,255,255,0.35)",marginBottom:4}}>{modeIcon()} {modeLabel()}</div>
                   <div className="pts-row">
                     <div>
                       <div className="pts-num">{viewDate?(history[viewDate]?.pts||0):todayPts}</div>
@@ -1761,7 +1951,7 @@ export default function App() {
                     </div>
                     <div className="pts-right">
                       <span className="pts-icon">{todayMode==="sunday"?"🕊️":todayMode==="saturday"?"🌄":travelMode?"✈️":"☀️"}</span>
-                      <div className="pts-streak">🔥 {streaks.current}-day streak</div>
+                      <div className="pts-streak">🔥 {momentum.current}-day run</div>
                       {consistency14!==null&&<div className="pts-streak" style={{color:"rgba(255,255,255,0.5)",marginTop:2}}>the return is the win — {consistency14}% these 2 weeks</div>}
                     </div>
                   </div>
@@ -1769,7 +1959,7 @@ export default function App() {
                   <div className="h-track"><div className={fillClass()} style={{width:`${viewDate?(history[viewDate]?.pct||0):todayPct}%`}}/></div>
                   <div className="h-stats">
                     <div className="h-stat"><div className="h-stat-val">{totalXP}</div><div className="h-stat-lbl">Total Pts</div></div>
-                    <div className="h-stat"><div className="h-stat-val">{streaks.longest}</div><div className="h-stat-lbl">Best Streak</div></div>
+                    <div className="h-stat"><div className="h-stat-val">{momentum.best}</div><div className="h-stat-lbl">Best Run</div></div>
                     <div className="h-stat"><div className="h-stat-val">{goalsComplete}/{goals.length}</div><div className="h-stat-lbl">Goals</div></div>
                   </div>
                 </div>
@@ -1837,14 +2027,15 @@ export default function App() {
                   {pastDays.map(ds=>{
                     const d=new Date(ds+"T12:00:00");const isToday=ds===today;const isViewing=viewDate===ds;const dc=dotColor(ds);
                     return(
-                      <div key={ds} className="day-chip" onClick={()=>viewPastDay(ds)}>
+                      <button key={ds} type="button" className="day-chip" onClick={()=>viewPastDay(ds)}
+                        aria-label={`View ${new Date(ds+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}`}>
                         <div className={`day-chip-inner ${isToday?"today":""} ${isViewing?"viewing":""}`}>
                           <div className="day-chip-dow">{DAYS[d.getDay()]}</div>
                           <div className="day-chip-num">{d.getDate()}</div>
                           {dc&&<div className="day-dot" style={{background:dc}}/>}
                           {isToday&&!viewDate&&<div className="day-dot" style={{background:"#35617E"}}/>}
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -2079,12 +2270,16 @@ export default function App() {
                     return(
                       <div key={cat.id} className="cat-section">
                         {/* Category header */}
-                        <div className="cat-header" onClick={()=>toggleCatCollapse(cat.id)}>
-                          <div className="cat-chevron" style={{transform:cat.collapsed?"rotate(-90deg)":"rotate(0deg)"}}>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8B99A3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="2 4 6 8 10 4"/>
-                            </svg>
-                          </div>
+                        <div className="cat-header">
+                          <button type="button" className="cat-toggle" aria-expanded={!cat.collapsed}
+                            aria-label={`${cat.collapsed?"Expand":"Collapse"} ${cat.name}`}
+                            onClick={()=>toggleCatCollapse(cat.id)}>
+                            <span className="cat-chevron" aria-hidden="true" style={{transform:cat.collapsed?"rotate(-90deg)":"rotate(0deg)"}}>
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8B99A3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="2 4 6 8 10 4"/>
+                              </svg>
+                            </span>
+                          </button>
                           {editCatId===cat.id?(
                             <input
                               className="cat-rename-input"
@@ -2095,7 +2290,9 @@ export default function App() {
                               onClick={e=>e.stopPropagation()}
                             />
                           ):(
-                            <div className="cat-header-name" onDoubleClick={e=>{e.stopPropagation();setEditCatId(cat.id);}}>{cat.name}</div>
+                            <button type="button" className="cat-header-name" style={{background:"none",border:"none",padding:0,font:"inherit",cursor:"pointer",textAlign:"left"}}
+                              onClick={()=>toggleCatCollapse(cat.id)}
+                              onDoubleClick={e=>{e.stopPropagation();setEditCatId(cat.id);}}>{cat.name}</button>
                           )}
                           <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:"auto"}}>
                             {cat.collapsed&&total>0&&(
@@ -2105,7 +2302,17 @@ export default function App() {
                               <button onClick={async e=>{e.stopPropagation();const u=todos.filter(t=>!((t.categoryId||"cat-default")===cat.id&&t.done));setTodos(u);await save("wb-todos-v1",u);}} className="cat-clear-btn">Clear done</button>
                             )}
                             {cat.id!=="cat-default"&&(
-                              <button onClick={async e=>{e.stopPropagation();if(window.confirm&&window.confirm("Delete this category?"))deleteCategory(cat.id);else deleteCategory(cat.id);}} className="cat-del-btn">✕</button>
+                              <button
+                                aria-label={`Delete category ${cat.name}`}
+                                onClick={e=>{
+                                  e.stopPropagation();
+                                  // Both branches used to call deleteCategory — cancelling
+                                  // destroyed the category anyway. Delete only on confirm.
+                                  const ok = typeof window.confirm === "function"
+                                    ? window.confirm(`Delete "${cat.name}"? Tasks in it will be removed.`)
+                                    : true;
+                                  if(ok) deleteCategory(cat.id);
+                                }} className="cat-del-btn">✕</button>
                             )}
                           </div>
                         </div>
@@ -2121,10 +2328,15 @@ export default function App() {
                             {catTodos.map(todo=>(
                               <div key={todo.id} style={{borderBottom:"1px solid rgba(11,25,41,0.04)"}}>
                                 <div className="c-row" style={{borderBottom:"none"}}>
-                                  <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
-                                  <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
-                                    <div className="c-main" style={{color:todo.done?"#8B99A3":"#10171C",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
-                                  </div>
+                                  <button type="button" role="checkbox" aria-checked={!!todo.done} aria-label={todo.text}
+                                    className="row-btn"
+                                    onClick={()=>toggleTodo(todo.id)}
+                                    style={{display:"flex",alignItems:"center",gap:13,flex:1,minWidth:0,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",font:"inherit"}}>
+                                    <span className={`todo-circle ${todo.done?"done":""}`} aria-hidden="true"/>
+                                    <span className="c-body" style={{minWidth:0}}>
+                                      <span className="c-main" style={{display:"block",color:todo.done?"#8B99A3":"#10171C",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</span>
+                                    </span>
+                                  </button>
                                   <button
                                     onClick={()=>setAddingSubFor(addingSubFor===todo.id?null:todo.id)}
                                     title="Add sub-item"
@@ -2137,8 +2349,12 @@ export default function App() {
                                   <div style={{paddingLeft:34,paddingBottom:6}}>
                                     {todo.subitems.map(sub=>(
                                       <div key={sub.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px 6px 0"}}>
-                                        <div className={`todo-circle ${sub.done?"done":""}`} style={{width:16,height:16,flexShrink:0}} onClick={()=>toggleSubTodo(todo.id,sub.id)}/>
-                                        <div onClick={()=>toggleSubTodo(todo.id,sub.id)} style={{flex:1,cursor:"pointer",fontSize:12.5,color:sub.done?"#8B99A3":"#454F56",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</div>
+                                        <button type="button" role="checkbox" aria-checked={!!sub.done} aria-label={sub.text}
+                                          onClick={()=>toggleSubTodo(todo.id,sub.id)}
+                                          style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",font:"inherit"}}>
+                                          <span className={`todo-circle ${sub.done?"done":""}`} aria-hidden="true" style={{width:16,height:16,flexShrink:0}}/>
+                                          <span style={{flex:1,fontSize:12.5,color:sub.done?"#8B99A3":"#454F56",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</span>
+                                        </button>
                                         <button className="todo-del" style={{fontSize:14}} onClick={()=>deleteSubTodo(todo.id,sub.id)}>×</button>
                                       </div>
                                     ))}
@@ -2208,11 +2424,11 @@ export default function App() {
               {rhythmTab==="monthly"&&(
                 <>
                   <div className="sec"><div className="sec-title">This Month</div></div>
-                  <div className="prompt-card" onClick={()=>setShowFF(true)}>
+                  <button type="button" className="prompt-card" onClick={()=>setShowFF(true)}>
                     <div style={{fontSize:22}}>👥</div>
                     <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div><div style={{fontSize:11,color:"#454F56"}}>{friendLog.length} this year</div></div>
                     <div style={{fontSize:14,color:"#454F56"}}>+</div>
-                  </div>
+                  </button>
                   {showFF&&(
                     <div className="add-form">
                       <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>Who did you connect with?</div>
@@ -2303,7 +2519,7 @@ export default function App() {
                   <div style={{fontSize:12,color:"#94A3B8"}}>${financials.savingsCurrent.toLocaleString()} of ${financials.savingsTarget.toLocaleString()}</div>
                 </div>
               </div>
-              {!showFinForm&&<div className="prompt-card" onClick={()=>setShowFinForm(true)}><div style={{fontSize:22}}>✏️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.04em",textTransform:"uppercase"}}>Update numbers</div><div style={{fontSize:11,color:"#454F56"}}>Debt, savings, targets</div></div><div style={{fontSize:14,color:"#454F56"}}>›</div></div>}
+              {!showFinForm&&<button type="button" className="prompt-card" onClick={()=>setShowFinForm(true)}><div style={{fontSize:22}}>✏️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.04em",textTransform:"uppercase"}}>Update numbers</div><div style={{fontSize:11,color:"#454F56"}}>Debt, savings, targets</div></div><div style={{fontSize:14,color:"#454F56"}}>›</div></button>}
               {showFinForm&&(
                 <div className="fin-edit">
                   <div style={{fontSize:16,fontWeight:700,color:"#121A20",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>Update Financials<button onClick={()=>setShowFinForm(false)} style={{background:"none",border:"none",color:"#94A3B8",fontSize:14,cursor:"pointer",fontWeight:600}}>Done</button></div>
@@ -2320,7 +2536,7 @@ export default function App() {
                 </div>
               )}
               <div className="sec"><div className="sec-title">Connections</div><div className="sec-sub">{friendLog.length} this year</div></div>
-              <div className="prompt-card" onClick={()=>setShowFF(true)}><div style={{fontSize:22}}>👥</div><div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div></div><div style={{fontSize:14,color:"#454F56"}}>+</div></div>
+              <button type="button" className="prompt-card" onClick={()=>setShowFF(true)}><div style={{fontSize:22}}>👥</div><div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div></div><div style={{fontSize:14,color:"#454F56"}}>+</div></button>
               {showFF&&(
                 <div className="add-form">
                   <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>Who did you connect with?</div>
@@ -2375,10 +2591,10 @@ export default function App() {
                     ):(
                       <div key={t.id} className="trip-row">
                         <span style={{fontSize:22}}>✈️</span>
-                        <div style={{flex:1,cursor:"pointer"}} onClick={()=>startEditTrip(t)}>
+                        <button type="button" aria-label={`Edit trip ${t.dest||""}`} style={{flex:1,cursor:"pointer",background:"none",border:"none",padding:0,textAlign:"left",font:"inherit"}} onClick={()=>startEditTrip(t)}>
                           <div style={{fontSize:15,fontWeight:700,color:"#121A20"}}>{t.dest}</div>
                           <div style={{fontSize:12,color:"#94A3B8"}}>{formatShort(t.start)}</div>
-                        </div>
+                        </button>
                         <div style={{fontSize:11,fontWeight:700,background:"#E0F7FA",color:"#2B5F7D",padding:"3px 9px",borderRadius:100}}>{t.type||"IJM"}</div>
                         <button className="todo-del" onClick={()=>deleteTrip(t.id)}>×</button>
                       </div>
@@ -2388,7 +2604,7 @@ export default function App() {
               )}
               <div className="sec"><div className="sec-title">Stats</div></div>
               <div className="stat-card">
-                {[["Streak",`${streaks.current} days`],["Best Streak",`${streaks.longest} days`],["Days Complete",`${streaks.totalDays||0}`],["Sabbaths Honored",`${streaks.sabbaths||0}`],["Practice Sessions",`${streaks.practiceSessions||0}`],["Trips",`${tripLog.length}`],["Goals Done",`${goalsComplete}/${goals.length}`],["Total Points",`${totalXP}`]].map(([l,v])=>(
+                {[["Milestone streak",`${streaks.current} days`],["Longest milestone streak",`${streaks.longest} days`],["Momentum run",`${momentum.current} days`],["Days Complete",`${streaks.totalDays||0}`],["Sabbaths Honored",`${streaks.sabbaths||0}`],["Practice Sessions",`${streaks.practiceSessions||0}`],["Trips",`${tripLog.length}`],["Goals Done",`${goalsComplete}/${goals.length}`],["Total Points",`${totalXP}`]].map(([l,v])=>(
                   <div key={l} className="s-row"><div className="s-lbl">{l}</div><div className="s-val">{v}</div></div>
                 ))}
               </div>
@@ -2606,7 +2822,7 @@ export default function App() {
                     <div style={{fontSize:12,color:"#94A3B8",fontStyle:"italic"}}>Let the answer be smaller than you think.</div>
                   </div>
                   <div className="sec"><div className="sec-title">Today's Reflection</div><div className="sec-sub">{new Date().toLocaleDateString("en-US",{weekday:"long"})}</div></div>
-                  <textarea className="journal-input" rows={8} placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"} value={journalInput} onChange={e=>saveJournalEntry(e.target.value)} style={{marginBottom:14}}/>
+                  <textarea className="journal-input" rows={8} placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"} value={journalInput} onChange={e=>onJournalChange(e.target.value)} onBlur={()=>flushJournal()} aria-label="Today's journal entry" style={{marginBottom:14}}/>
                   {Object.entries(journal).filter(([d,t])=>d!==today&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5).length>0&&(
                     <>
                       <div className="sec"><div className="sec-title">Recent</div></div>
@@ -2634,10 +2850,10 @@ export default function App() {
                       <div className="btn-row"><button className="btn-s" onClick={()=>setEditingValueIdx(null)}>Cancel</button><button className="btn-p" onClick={saveValue}>Save</button></div>
                     </div>
                   ):(
-                    <div className="tenet-row" key={v.n} onClick={()=>startEditValue(i)} style={{cursor:"pointer"}}>
+                    <button type="button" className="tenet-row" key={v.n} aria-label={`Edit value: ${v.n}`} onClick={()=>startEditValue(i)} style={{cursor:"pointer",width:"100%",textAlign:"left",font:"inherit"}}>
                       <div className="tenet-s">{v.n.slice(0,1)}</div>
                       <div><div style={{fontSize:15,fontWeight:700,color:"#121A20",marginBottom:2}}>{v.n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{v.d}</div></div>
-                    </div>
+                    </button>
                   )
                 ))}
               </div>

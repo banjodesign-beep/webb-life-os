@@ -1,7 +1,7 @@
 // streakEngine.js — pure functions for the two stakes streaks (main, health).
 // No React/store dependencies.
 
-import { isMilestoneDay, isMajorMilestone, milestoneLabel } from "../config/meridianConfig.js";
+import { isMilestoneDay, isMajorMilestone, milestoneLabel, GRACE_TOKEN_CAP } from "../config/meridianConfig.js";
 
 // Days between two "YYYY-MM-DD" date strings (b - a), in whole days.
 export function daysBetween(aStr, bStr) {
@@ -70,7 +70,10 @@ export function checkMilestone(previousCurrent, nextCurrent, lastAcked = 0) {
   };
 }
 
-/** Weekly grace-token accrual. Call once per new week seen. */
-export function accrueGraceToken(currentBalance, perWeek) {
-  return currentBalance + perWeek;
+/**
+ * Weekly grace-token accrual. Call once per new week seen.
+ * Capped — an unbounded balance eventually makes any absence free.
+ */
+export function accrueGraceToken(currentBalance, perWeek, cap = GRACE_TOKEN_CAP) {
+  return Math.min(currentBalance + perWeek, cap);
 }
