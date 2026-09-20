@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { load, save, hasLocalSnapshot, isDegraded, subscribeSync, retrySync, flushPending } from "./lib/supabase.js";
+import { load, save } from "./lib/supabase.js";
 import { resolveStreakAdvance, checkMilestone, accrueGraceToken } from "./lib/streakEngine.js";
-import { CATEGORY_LABELS, GRACE_TOKENS_PER_WEEK, GRACE_TOKEN_CAP, MILESTONE_BONUS_XP, generateMilestoneList,
-         KEYSTONE_XP, ARC_STEP_XP, ARC_COMPLETE_XP, GOAL_XP, WORKOUT_XP } from "./config/meridianConfig.js";
+import { CATEGORY_LABELS, GRACE_TOKENS_PER_WEEK, MILESTONE_BONUS_XP, generateMilestoneList,
+         WEIGHTS, WEIGHT_LEGEND, journeyLevelFor, journeyNodes } from "./config/meridianConfig.js";
 import MilestoneJourney from "./components/MilestoneJourney.jsx";
+import Journey from "./components/Journey.jsx";
 import MilestoneSplash from "./components/MilestoneSplash.jsx";
-import { pickKeystone, pickSabbathInvitation } from "./config/keystoneLibrary.js";
-import { DEFAULT_ARCS, nextStep, isArcComplete, pickArc } from "./config/arcs.js";
+import { pickKeystone, pickSabbathInvitation, KEYSTONE_LIBRARY } from "./config/keystoneLibrary.js";
+import { DEFAULT_ARCS, arcProgress, nextStep, isArcComplete, pickArc, RETIRED_ARC_IDS } from "./config/arcs.js";
 import { buildWeeklyReview } from "./lib/weeklyReview.js";
 
 // ── DATE HELPERS ──────────────────────────────────────────────────────
@@ -23,11 +24,10 @@ const getDayKey = (ds, mode) => `cl-${mode}-${ds}`;
 const formatDate = () => new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
 const formatShort = (iso) => new Date(iso.split("T")[0]+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
 const getPastDays = (n) => { const days=[]; for(let i=n-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);days.push(localDate(d));} return days; };
-const getLevelInfo = (xp) => {
-  const T=[{l:1,max:499,t:"Getting Started"},{l:2,max:999,t:"Building Rhythm"},{l:3,max:1999,t:"Gaining Momentum"},{l:4,max:3499,t:"In the Flow"},{l:5,max:5999,t:"Man After God\'s Heart"},{l:6,max:Infinity,t:"Legacy Builder"}];
-  const tier=T.find(t=>xp<=t.max)||T[T.length-1]; const prev=T[T.indexOf(tier)-1],pm=prev?prev.max:-1;
-  return {...tier,progress:tier.max===Infinity?100:Math.round(((xp-pm-1)/(tier.max-pm))*100)};
-};
+// NOTE: levels used to derive from lifetime points. That ladder was eaten in
+// about two months because the day-close bonus was 50 + streak x 10, so a
+// single tap at a 60-day streak paid 650 against a 6,000-point top level.
+// Levels now derive from DAYS KEPT — see journeyLevelFor in meridianConfig.js.
 const JOURNAL_PROMPTS = [
   "What deserves your best attention — not your most attention?",
   "What did today ask of you that you weren't expecting?",
@@ -112,88 +112,114 @@ const getDailyScripture = () => {
   return SCRIPTURES[day%SCRIPTURES.length];
 };
 
+// Items deliberately retired from the app. Saved copies are dropped on load.
+const RETIRED_ITEM_IDS = ["p2"];
+
+// Saved checklists shadow DEFAULT_LISTS entirely, so a rescale has to be
+// applied to them too or it never reaches a device that used the editor.
+// Idempotent: values are looked up by id from the defaults, so re-running it
+// changes nothing. Custom items the user added keep whatever they set.
+function migrateLists(saved){
+  if(!saved || typeof saved!=="object") return saved;
+  const clean = (txt)=> typeof txt==="string"
+    ? txt.replace(/One Five One/g,"the platform").replace(/\b151\b/g,"the platform")
+    : txt;
+  const out = {};
+  Object.keys(saved).forEach(listKey=>{
+    const arr = saved[listKey];
+    if(!Array.isArray(arr)){ out[listKey]=arr; return; }
+    const defs = DEFAULT_LISTS[listKey]||[];
+    out[listKey] = arr
+      .filter(it=>!RETIRED_ITEM_IDS.includes(it.id))
+      .map(it=>{
+        const def = defs.find(d=>d.id===it.id);
+        return {...it, text:clean(it.text), sub:clean(it.sub), xp: def ? def.xp : it.xp};
+      });
+  });
+  return out;
+}
+
 // ── DEFAULT CHECKLISTS (Supabase-overridable) ─────────────────────────
 const DEFAULT_LISTS = {
   weekday:[
-    {id:"wd0",text:"30 min stillness",sub:"Prayer before the day opens.",xp:15,icon:"🕊️",cat:"spirit",w:"core"},
-    {id:"wd1",text:"Morning anchor",sub:"Identity before activity.",xp:10,icon:"☀️",cat:"spirit",w:"bonus"},
-    {id:"wd2",text:"No caffeine after 12pm",sub:"Slow metabolizer — protect sleep.",xp:5,icon:"☕",cat:"health",w:"bonus"},
-    {id:"wd3",text:"Present with family",sub:"Eye contact. No phone at dinner.",xp:10,icon:"🏠",cat:"home",w:"core"},
-    {id:"wd4",text:"Workout done",sub:"Strength, sprint, or movement.",xp:12,icon:"💪",cat:"health",w:"core"},
-    {id:"wd5",text:"No decisions after 9pm",sub:"Hard problems get morning slots.",xp:5,icon:"🌙",cat:"work",w:"bonus"},
-    {id:"wd6",text:"Hydration",sub:"Water before coffee. All day.",xp:5,icon:"💧",cat:"health",w:"bonus"},
+    {id:"wd0",text:"30 min stillness",sub:"Prayer before the day opens.",xp:2,icon:"🕊️",cat:"spirit",w:"core"},
+    {id:"wd1",text:"Morning anchor",sub:"Identity before activity.",xp:1,icon:"☀️",cat:"spirit",w:"bonus"},
+    {id:"wd2",text:"No caffeine after 12pm",sub:"Slow metabolizer — protect sleep.",xp:1,icon:"☕",cat:"health",w:"bonus"},
+    {id:"wd3",text:"Present with family",sub:"Eye contact. No phone at dinner.",xp:2,icon:"🏠",cat:"home",w:"core"},
+    {id:"wd4",text:"Workout done",sub:"Strength, sprint, or movement.",xp:2,icon:"💪",cat:"health",w:"core"},
+    {id:"wd5",text:"No decisions after 9pm",sub:"Hard problems get morning slots.",xp:1,icon:"🌙",cat:"work",w:"bonus"},
+    {id:"wd6",text:"Hydration",sub:"Water before coffee. All day.",xp:1,icon:"💧",cat:"health",w:"bonus"},
   ],
   saturday:[
-    {id:"sa0",text:"Family breakfast",sub:"Together. No phones.",xp:15,icon:"🍳",cat:"home",w:"core"},
-    {id:"sa1",text:"River — connection time",sub:"Intentional. His world, his pace.",xp:15,icon:"⚽",cat:"home",w:"core"},
-    {id:"sa2",text:"Annie — connection time",sub:"Her space, her interests.",xp:15,icon:"🎭",cat:"home",w:"core"},
-    {id:"sa3",text:"Music practice",sub:"Bass, guitar, or piano. 30 min+. Shows on weeks without a lesson.",xp:12,icon:"🎸",cat:"music",w:"bonus"},
-    {id:"sa4",text:"Movement / outdoors",sub:"Walk, hike, or workout.",xp:10,icon:"🌄",cat:"health",w:"core"},
-    {id:"sa5",text:"Platform — 1 action",sub:"One thing toward the books or 151.",xp:10,icon:"✍️",cat:"work",w:"core"},
-    {id:"sa6",text:"Jules — date or moment",sub:"Even 30 minutes. Just the two of you.",xp:15,icon:"💍",cat:"home",w:"core"},
+    {id:"sa0",text:"Family breakfast",sub:"Together. No phones.",xp:2,icon:"🍳",cat:"home",w:"core"},
+    {id:"sa1",text:"River — connection time",sub:"Intentional. His world, his pace.",xp:2,icon:"⚽",cat:"home",w:"core"},
+    {id:"sa2",text:"Annie — connection time",sub:"Her space, her interests.",xp:2,icon:"🎭",cat:"home",w:"core"},
+    {id:"sa3",text:"Music practice",sub:"Bass, guitar, or piano. 30 min+. Shows on weeks without a lesson.",xp:2,icon:"🎸",cat:"music",w:"bonus"},
+    {id:"sa4",text:"Movement / outdoors",sub:"Walk, hike, or workout.",xp:2,icon:"🌄",cat:"health",w:"core"},
+    {id:"sa5",text:"Platform — 1 action",sub:"One thing toward the books or the platform.",xp:2,icon:"✍️",cat:"work",w:"core"},
+    {id:"sa6",text:"Jules — date or moment",sub:"Even 30 minutes. Just the two of you.",xp:2,icon:"💍",cat:"home",w:"core"},
   ],
   sunday:[
-    {id:"su0",text:"Church",sub:"Show up. Be present.",xp:20,icon:"⛪",cat:"spirit",w:"core"},
-    {id:"su1",text:"30 min stillness",sub:"Sabbath starts in the quiet.",xp:15,icon:"🕊️",cat:"spirit",w:"bonus"},
-    {id:"su2",text:"Sabbath honored",sub:"Rest in God\'s sovereignty.",xp:20,icon:"🌿",cat:"spirit",w:"core"},
-    {id:"su3",text:"Family time",sub:"No agenda. Just present.",xp:15,icon:"🏠",cat:"home",w:"core"},
+    {id:"su0",text:"Church",sub:"Show up. Be present.",xp:2,icon:"⛪",cat:"spirit",w:"core"},
+    {id:"su1",text:"30 min stillness",sub:"Sabbath starts in the quiet.",xp:1,icon:"🕊️",cat:"spirit",w:"bonus"},
+    {id:"su2",text:"Sabbath honored",sub:"Rest in God\'s sovereignty.",xp:3,icon:"🌿",cat:"spirit",w:"core"},
+    {id:"su3",text:"Family time",sub:"No agenda. Just present.",xp:2,icon:"🏠",cat:"home",w:"core"},
   ],
   travel:[
-    {id:"tr0",text:"Morning anchor",sub:"The compass doesn\'t change with timezone.",xp:12,icon:"🕊️",cat:"spirit",w:"bonus"},
-    {id:"tr1",text:"30 min stillness",sub:"Especially on the road.",xp:10,icon:"☀️",cat:"spirit",w:"core"},
-    {id:"tr2",text:"No caffeine after 12pm",sub:"Jet lag + slow metabolizer.",xp:5,icon:"☕",cat:"health",w:"bonus"},
-    {id:"tr3",text:"Sleep kit deployed",sub:"Eye mask, earplugs, room dark.",xp:5,icon:"😴",cat:"health",w:"bonus"},
-    {id:"tr4",text:"Called Jules and kids",sub:"Connection doesn\'t stop at the gate.",xp:10,icon:"📱",cat:"home",w:"core"},
-    {id:"tr5",text:"20 min movement",sub:"Hotel gym or bodyweight.",xp:8,icon:"🏃",cat:"health",w:"core"},
-    {id:"tr6",text:"Hydration — water first",sub:"Not just airport coffee.",xp:3,icon:"💧",cat:"health",w:"bonus"},
-    {id:"tr7",text:"IJM intention set",sub:"Why am I here today?",xp:8,icon:"🎯",cat:"work",w:"bonus"},
-    {id:"tr8",text:"Platform capture",sub:"What feeds the books or 151?",xp:10,icon:"✍️",cat:"work",w:"core"},
+    {id:"tr0",text:"Morning anchor",sub:"The compass doesn\'t change with timezone.",xp:1,icon:"🕊️",cat:"spirit",w:"bonus"},
+    {id:"tr1",text:"30 min stillness",sub:"Especially on the road.",xp:2,icon:"☀️",cat:"spirit",w:"core"},
+    {id:"tr2",text:"No caffeine after 12pm",sub:"Jet lag + slow metabolizer.",xp:1,icon:"☕",cat:"health",w:"bonus"},
+    {id:"tr3",text:"Sleep kit deployed",sub:"Eye mask, earplugs, room dark.",xp:1,icon:"😴",cat:"health",w:"bonus"},
+    {id:"tr4",text:"Called Jules and kids",sub:"Connection doesn\'t stop at the gate.",xp:2,icon:"📱",cat:"home",w:"core"},
+    {id:"tr5",text:"20 min movement",sub:"Hotel gym or bodyweight.",xp:2,icon:"🏃",cat:"health",w:"core"},
+    {id:"tr6",text:"Hydration — water first",sub:"Not just airport coffee.",xp:1,icon:"💧",cat:"health",w:"bonus"},
+    {id:"tr7",text:"IJM intention set",sub:"Why am I here today?",xp:1,icon:"🎯",cat:"work",w:"bonus"},
+    {id:"tr8",text:"Platform capture",sub:"What feeds the books or the platform?",xp:1,icon:"✍️",cat:"work",w:"core"},
   ],
   weekly:[
-    {id:"wk0",text:"Financial dashboard",sub:"Friday. 5 minutes.",xp:10,icon:"📊"},
-    {id:"wk1",text:"River transport",sub:"Practices handled.",xp:10,icon:"⚽"},
-    {id:"wk2",text:"Real connection — Jules",sub:"Not logistics. Actual presence.",xp:15,icon:"💍"},
-    {id:"wk3",text:"Physical training 3x",sub:"Strength and sprint.",xp:15,icon:"🏋️"},
-    {id:"wk4",text:"Music practice session",sub:"1 minimum. 3 is the target.",xp:12,icon:"🎸"},
+    {id:"wk0",text:"Financial dashboard",sub:"Friday. 5 minutes.",xp:3,icon:"📊"},
+    {id:"wk1",text:"River transport",sub:"Practices handled.",xp:3,icon:"⚽"},
+    {id:"wk2",text:"Real connection — Jules",sub:"Not logistics. Actual presence.",xp:3,icon:"💍"},
+    {id:"wk3",text:"Physical training 3x",sub:"Strength and sprint.",xp:3,icon:"🏋️"},
+    {id:"wk4",text:"Music practice session",sub:"1 minimum. 3 is the target.",xp:3,icon:"🎸"},
   ],
   ijm:[
-    {id:"i0",text:"Strategic thinking hour",sub:"Uninterrupted. Big picture only.",xp:20,icon:"🧠"},
-    {id:"i1",text:"Team health pulse",sub:"How is my team? Am I leading well?",xp:15,icon:"👥"},
-    {id:"i2",text:"Platform capture",sub:"What from IJM this week feeds the books?",xp:20,icon:"📚"},
-    {id:"i3",text:"Global impact moment",sub:"One thing that reminded me why.",xp:10,icon:"🌍"},
+    {id:"i0",text:"Strategic thinking hour",sub:"Uninterrupted. Big picture only.",xp:3,icon:"🧠"},
+    {id:"i1",text:"Team health pulse",sub:"How is my team? Am I leading well?",xp:3,icon:"👥"},
+    {id:"i2",text:"Platform capture",sub:"What from IJM this week feeds the books?",xp:2,icon:"📚"},
+    {id:"i3",text:"Global impact moment",sub:"One thing that reminded me why.",xp:1,icon:"🌍"},
   ],
   monthly:[
-    {id:"m0",text:"Financial review — Jules",sub:"30 min. Both present.",xp:30,icon:"💼"},
-    {id:"m1",text:"LinkedIn article",sub:"Test a book idea.",xp:40,icon:"📱"},
-    {id:"m2",text:"Focused time — both kids",sub:"Annie + River. Intentional.",xp:25,icon:"👨‍👧‍👦"},
-    {id:"m3",text:"Annie Boba date",sub:"Her space, her pace.",xp:20,icon:"🧋"},
-    {id:"m4",text:"Parent contact — Australia",sub:"Call, video, or message.",xp:20,icon:"🌏"},
-    {id:"m5",text:"Personal reflection",sub:"Am I moving toward 55?",xp:25,icon:"🪞"},
-    {id:"m6",text:"Album session — 1hr min",sub:"Dedicated time on the record.",xp:35,icon:"🎵"},
-    {id:"m7",text:"Something fun",sub:"Concert, event, experience.",xp:20,icon:"🎉"},
-    {id:"m8",text:"Sabbath 1 of 3",sub:"Three per month minimum.",xp:25,icon:"🕊️"},
-    {id:"m9",text:"Sabbath 2 of 3",sub:"Three per month minimum.",xp:25,icon:"🕊️"},
-    {id:"m10",text:"Sabbath 3 of 3",sub:"Three per month minimum.",xp:25,icon:"🕊️"},
+    {id:"m0",text:"Financial review — Jules",sub:"30 min. Both present.",xp:5,icon:"💼"},
+    {id:"m1",text:"LinkedIn article",sub:"Test a book idea.",xp:5,icon:"📱"},
+    {id:"m2",text:"Focused time — both kids",sub:"Annie + River. Intentional.",xp:5,icon:"👨‍👧‍👦"},
+    {id:"m3",text:"Annie Boba date",sub:"Her space, her pace.",xp:3,icon:"🧋"},
+    {id:"m4",text:"Parent contact — Australia",sub:"Call, video, or message.",xp:3,icon:"🌏"},
+    {id:"m5",text:"Personal reflection",sub:"Am I moving toward 55?",xp:5,icon:"🪞"},
+    {id:"m6",text:"Album session — 1hr min",sub:"Dedicated time on the record.",xp:5,icon:"🎵"},
+    {id:"m7",text:"Something fun",sub:"Concert, event, experience.",xp:3,icon:"🎉"},
+    {id:"m8",text:"Sabbath 1 of 3",sub:"Three per month minimum.",xp:5,icon:"🕊️"},
+    {id:"m9",text:"Sabbath 2 of 3",sub:"Three per month minimum.",xp:5,icon:"🕊️"},
+    {id:"m10",text:"Sabbath 3 of 3",sub:"Three per month minimum.",xp:5,icon:"🕊️"},
   ],
   annual:[
-    {id:"a0",text:"Annual physical",sub:"Full bloodwork. Ferritin included.",xp:100,icon:"🩺"},
-    {id:"a1",text:"Ferritin and iron checked",sub:"HFE variant. Rule it in or out.",xp:50,icon:"🔬"},
-    {id:"a2",text:"Dental checkup",sub:"Twice yearly ideally.",xp:40,icon:"🦷"},
-    {id:"a3",text:"Financial planner meeting",sub:"529, platform income, parents.",xp:75,icon:"🏦"},
-    {id:"a4",text:"Estate/will reviewed",sub:"Jules knows where everything is.",xp:60,icon:"📋"},
-    {id:"a5",text:"Goal architecture review",sub:"Full year. Reset the vision.",xp:75,icon:"🗺️"},
-    {id:"a6",text:"Family adventure booked",sub:"Next year\'s trip decided by June.",xp:50,icon:"✈️"},
-    {id:"a7",text:"Anniversary intentional",sub:"December 2. Not a calendar entry.",xp:60,icon:"💍"},
-    {id:"a8",text:"Parent care plan reviewed",sub:"Australia. Aging considerations.",xp:50,icon:"🌏"},
+    {id:"a0",text:"Annual physical",sub:"Full bloodwork. Ferritin included.",xp:10,icon:"🩺"},
+    {id:"a1",text:"Ferritin and iron checked",sub:"HFE variant. Rule it in or out.",xp:5,icon:"🔬"},
+    {id:"a2",text:"Dental checkup",sub:"Twice yearly ideally.",xp:5,icon:"🦷"},
+    {id:"a3",text:"Financial planner meeting",sub:"529, platform income, parents.",xp:10,icon:"🏦"},
+    {id:"a4",text:"Estate/will reviewed",sub:"Jules knows where everything is.",xp:10,icon:"📋"},
+    {id:"a5",text:"Goal architecture review",sub:"Full year. Reset the vision.",xp:10,icon:"🗺️"},
+    {id:"a6",text:"Family adventure booked",sub:"Next year\'s trip decided by June.",xp:5,icon:"✈️"},
+    {id:"a7",text:"Anniversary intentional",sub:"December 2. Not a calendar entry.",xp:10,icon:"💍"},
+    {id:"a8",text:"Parent care plan reviewed",sub:"Australia. Aging considerations.",xp:5,icon:"🌏"},
   ],
   platform:[
-    {id:"p0",text:"Recalibrated — chapter work",sub:"Draft, edit, or outline. Any movement counts.",xp:40,icon:"📖"},
-    {id:"p1",text:"The Sequence — chapter or article",sub:"LinkedIn or manuscript progress.",xp:40,icon:"✍️"},
-    {id:"p2",text:"One Five One — content or planning",sub:"Podcast, groundwork, or movement planning.",xp:35,icon:"🔥"},
-    {id:"p3",text:"IJM strategic thinking hour",sub:"Uninterrupted. Big picture only.",xp:30,icon:"🧠"},
-    {id:"p4",text:"IJM team health pulse",sub:"How is my team?",xp:20,icon:"👥"},
-    {id:"p5",text:"Platform capture",sub:"What feeds the books or 151?",xp:25,icon:"🌍"},
-    {id:"p6",text:"BenWebb.com or social content",sub:"Any public-facing platform action.",xp:30,icon:"📱"},
+    {id:"p0",text:"Recalibrated — chapter work",sub:"Draft, edit, or outline. Any movement counts.",xp:5,icon:"📖"},
+    {id:"p1",text:"The Sequence — chapter or article",sub:"LinkedIn or manuscript progress.",xp:5,icon:"✍️"},
+    {id:"p3",text:"IJM strategic thinking hour",sub:"Uninterrupted. Big picture only.",xp:3,icon:"🧠"},
+    {id:"p4",text:"IJM team health pulse",sub:"How is my team?",xp:3,icon:"👥"},
+    {id:"p5",text:"Platform capture",sub:"What feeds the books or the platform?",xp:2,icon:"🌍"},
+    {id:"p6",text:"BenWebb.com or social content",sub:"Any public-facing platform action.",xp:2,icon:"📱"},
   ],
 };
 
@@ -237,26 +263,14 @@ const ACHIEVEMENTS = [
   {id:"a5",icon:"🎵",title:"In the Studio",check:s=>s.practiceSessions>=10},
   {id:"a6",icon:"👥",title:"Well Connected",check:s=>s.friendDinners>=6},
   {id:"a7",icon:"✈️",title:"Global Servant",check:s=>s.tripCount>=3},
-  {id:"a8",icon:"👑",title:"1,000 Points",check:s=>s.totalXP>=1000},
-  {id:"a9",icon:"🌍",title:"Legacy Builder",check:s=>s.totalXP>=2500},
+  {id:"a8",icon:"👑",title:"100 Days Kept",check:s=>s.daysKept>=100},
+  {id:"a9",icon:"🌍",title:"A Year Kept",check:s=>s.daysKept>=365},
 ];
 
-const APP_VERSION = "1.11";
-
-// ── MOTION PREFERENCE ─────────────────────────────────────────────────
-// CSS handles the declarative animations, but confetti, the XP float and
-// the boot splash are JS-driven and have to opt out themselves.
-function prefersReducedMotion(){
-  if(typeof window==="undefined"||!window.matchMedia) return false;
-  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
-  catch { return false; }
-}
+const APP_VERSION = "1.12";
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {
-  // No confetti at all under reduced motion — the completion state itself
-  // is the feedback, and 50 falling elements is the opposite of subtle.
-  if(prefersReducedMotion()) return null;
   const pieces = Array.from({length:50},(_,i)=>({
     id:i,x:Math.random()*100,
     color:["#35617E","#60A5FA","#34D399","#A78BFA","#FBBF24","#F472B6"][Math.floor(Math.random()*6)],
@@ -271,11 +285,8 @@ function Confetti() {
   );
 }
 function XPFloat({amount,onDone}) {
-  const reduced = prefersReducedMotion();
-  useEffect(()=>{const t=setTimeout(onDone,reduced?900:1200);return()=>clearTimeout(t);},[]);
-  // Still shown when motion is reduced — the number is the information.
-  // It just sits still and fades via opacity instead of flying upward.
-  return <div role="status" aria-live="polite" style={{position:"fixed",bottom:140,right:24,fontWeight:800,fontSize:18,color:"#35617E",animation:reduced?"none":"xpFloat 1.2s ease-out forwards",opacity:reduced?0.95:undefined,pointerEvents:"none",zIndex:500}}>+{amount} pts</div>;
+  useEffect(()=>{const t=setTimeout(onDone,1200);return()=>clearTimeout(t);},[]);
+  return <div style={{position:"fixed",bottom:140,right:24,fontWeight:800,fontSize:18,color:"#35617E",animation:"xpFloat 1.2s ease-out forwards",pointerEvents:"none",zIndex:500}}>+{amount} pts</div>;
 }
 
 // ── APP ICON ──────────────────────────────────────────────────────────
@@ -294,9 +305,6 @@ function SplashScreen({onDone}) {
   const dateStr = today.toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric"}).split("/").join(".");
 
   useEffect(()=>{
-    // Under reduced motion the boot sequence is a 3.2s animation with no
-    // information in it — skip straight through to the app.
-    if(prefersReducedMotion()){ const t=setTimeout(onDone,150); return()=>clearTimeout(t); }
     const t1=setTimeout(()=>setPhase(1),400);
     const t2=setTimeout(()=>setPhase(2),300);
     const t3=setTimeout(()=>setPhase(3),2600);
@@ -380,9 +388,7 @@ const CheckGroup = React.memo(function CheckGroup({items,state,onToggle,bouncing
         const val=state[item.id]; const isDone=val?.checked; const isBounce=bouncing===item.id;
         const dc=travel?"done-travel":"done";
         return (
-          <button key={item.id} type="button" role="checkbox" aria-checked={!!isDone}
-            aria-label={`${item.text}${item.sub?" — "+item.sub:""}`}
-            className="c-row" style={{animationDelay:`${idx*0.035}s`}} onClick={()=>onToggle(item.id,item,state)}>
+          <div key={item.id} className="c-row" style={{animationDelay:`${idx*0.035}s`}} onClick={()=>onToggle(item.id,item,state)}>
             <div className={`c-icon-bg ${isDone?dc:""}`}>{item.icon}</div>
             <div className={`c-circle ${isDone?dc:""} ${isBounce?"bounce":""}`}/>
             <div className="c-body">
@@ -391,42 +397,12 @@ const CheckGroup = React.memo(function CheckGroup({items,state,onToggle,bouncing
               {isDone&&val.at&&<div className="c-ts">{new Date(val.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>}
             </div>
             <div className={`c-xp ${isDone?"done":travel?"travel":""}`}>{isDone?"✓":`+${item.xp}`}</div>
-          </button>
+          </div>
         );
       })}
     </div>
   );
 });
-
-// ── SYNC CHIP ─────────────────────────────────────────────────────────
-// Writes used to fail silently — save() caught the error and logged to the
-// console. This is the visible counterpart: everything is already safe
-// locally, and this says whether the server has it yet.
-function SyncChip({state,onRetry}){
-  const {status,pending} = state||{};
-  if(status==="synced") return null;               // quiet when there's nothing to say
-  const offline = status==="offline";
-  return (
-    <button
-      type="button"
-      onClick={offline?onRetry:undefined}
-      aria-live="polite"
-      title={offline
-        ? `${pending} change${pending===1?"":"s"} saved on this device, waiting to sync. Tap to retry.`
-        : "Syncing changes"}
-      style={{
-        display:"flex",alignItems:"center",gap:5,
-        background:offline?"rgba(180,83,60,0.14)":"rgba(43,95,125,0.12)",
-        border:`1px solid ${offline?"rgba(180,83,60,0.35)":"rgba(43,95,125,0.28)"}`,
-        color:offline?"#B4533C":"#2B5F7D",
-        borderRadius:999,padding:"5px 10px",fontSize:10.5,fontWeight:800,
-        letterSpacing:"0.06em",cursor:offline?"pointer":"default",whiteSpace:"nowrap",
-      }}>
-      <span aria-hidden="true">{offline?"⚠":"⟳"}</span>
-      <span>{offline?`Saved here · ${pending}`:"Syncing"}</span>
-    </button>
-  );
-}
 
 // ── CSS ───────────────────────────────────────────────────────────────
 const CSS = `
@@ -794,46 +770,6 @@ select.field{-webkit-appearance:none;cursor:pointer;}
 .cat-del-btn{font-size:14px;color:#8B99A3;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;}
 .cat-del-btn:hover{color:#EF4444;}
 
-/* ── Button resets ───────────────────────────────────────────────────
-   These elements were clickable divs. As real buttons they inherit UA
-   styling, so it has to be stripped for them to look unchanged. */
-button.c-row,button.prompt-card,button.day-chip,button.tenet-row{
-  width:100%;font:inherit;color:inherit;text-align:left;
-  -webkit-appearance:none;appearance:none;
-}
-button.c-row{background:transparent;border:none;border-bottom:1px solid rgba(35,181,211,0.06);cursor:pointer;}
-button.c-row:last-child{border-bottom:none;}
-button.day-chip{
-  width:auto;cursor:pointer;
-  background:none;border:none;padding:0;margin:0;
-  -webkit-appearance:none;appearance:none;
-}
-button.day-chip:focus-visible{outline:none;}
-button.day-chip:focus-visible .day-chip-inner{outline:2px solid #2B5F7D;outline-offset:1px;}
-.cat-toggle{background:none;border:none;padding:0;margin:0;display:flex;align-items:center;cursor:pointer;}
-.cat-header-name:focus-visible{outline-offset:1px;}
-
-/* ── Focus visibility ────────────────────────────────────────────────
-   Several controls were clickable divs with no focus treatment at all.
-   Now that they're real buttons they need a visible ring. */
-:focus-visible{outline:2px solid #2B5F7D;outline-offset:2px;border-radius:6px;}
-.hero :focus-visible,.milestone-splash :focus-visible{outline-color:#9FD3EC;}
-
-/* ── Reduced motion ──────────────────────────────────────────────────
-   Confetti, bounce, XP float, splash, shimmer, glow and route
-   transitions were all unconditional. Completion feedback must survive
-   with motion off, so checks and progress still change state — they
-   just stop moving. */
-@media (prefers-reduced-motion: reduce){
-  *,*::before,*::after{
-    animation-duration:0.001ms !important;
-    animation-iteration-count:1 !important;
-    transition-duration:0.001ms !important;
-    scroll-behavior:auto !important;
-  }
-  .pts-num,.c-row,.c-circle.bounce{animation:none !important;}
-  .hero{background-size:100% 100% !important;}
-}
 `;
 
 
@@ -844,8 +780,6 @@ export default function App() {
   const [rhythmTab,   setRhythmTab]   = useState("weekly");
   const [loading,     setLoading]     = useState(true);
   const [loadError,   setLoadError]   = useState(false);
-  const [syncState,   setSyncState]   = useState({status:"synced",pending:0});
-  const flushJournalRef = useRef(null);
   const [toast,       setToast]       = useState(null);
   const [toastKey,    setToastKey]    = useState(0);
   const [xpFloat,     setXpFloat]     = useState(null);
@@ -904,21 +838,6 @@ export default function App() {
   const [newCatName,  setNewCatName]  = useState("");
   const [editCatId,   setEditCatId]   = useState(null);
   const [totalXP,     setTotalXP]     = useState(0);
-  // Mirror of totalXP that is always current within a single tick. Award sites
-  // used to read the `totalXP` closure, so two awards in the same tick could
-  // both compute from the same base and one would be lost. Every mutation now
-  // goes through adjustXP, which is also the single place a reversal can
-  // subtract — previously keystone, arc, goal and workout awarded on completion
-  // and refunded nothing on undo, so the score could be farmed by toggling.
-  const xpRef = useRef(0);
-  const adjustXP = useCallback(async (delta) => {
-    if(!delta) return xpRef.current;
-    const next = Math.max(0, (xpRef.current || 0) + delta);
-    xpRef.current = next;
-    setTotalXP(next);
-    await save("wb-totalxp", next);
-    return next;
-  }, []);
   const [streaks,     setStreaks]     = useState({current:0,longest:0,lastDate:null,totalDays:0,sabbaths:0,practiceSessions:0,friendDinners:0,tripCount:0});
   // ── Engagement layer: stakes streaks, grace tokens, rest day, lesson toggle, milestones ──
   const [healthStreak, setHealthStreak] = useState({current:0,longest:0,lastDate:null});
@@ -926,10 +845,9 @@ export default function App() {
   const [graceAccruedWeek, setGraceAccruedWeek] = useState(null);
   const [restDayToday, setRestDayToday] = useState(false);
   const [lessonThisWeek, setLessonThisWeek] = useState(false);
-  const [arcBonus,    setArcBonus]    = useState({}); // {arcId:true} — completion bonus already paid
   const [milestoneAck, setMilestoneAck] = useState({main:0,health:0}); // highest milestone day already shown
   const [milestoneQueue, setMilestoneQueue] = useState([]); // pending splash celebrations
-  const [progressSubTab, setProgressSubTab] = useState("stats"); // stats | rhythms | platform | health
+  const [progressSubTab, setProgressSubTab] = useState("stats"); // stats | rhythms | health  (platform moved to Plan)
   const [addingSubFor, setAddingSubFor] = useState(null); // todo id currently adding a sub-item
   const [subInput, setSubInput] = useState("");
   // Vision Anchor + Values (editable)
@@ -959,6 +877,8 @@ export default function App() {
   const [arcs, setArcs] = useState(DEFAULT_ARCS);
   const [arcOffset, setArcOffset] = useState(0);
   const [showMomentumInfo, setShowMomentumInfo] = useState(false);
+  const [showPlatform, setShowPlatform] = useState(false);
+  const [showWeights, setShowWeights] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [arcsSnapshot, setArcsSnapshot] = useState(null); // last week's arc state, for movement detection
   // Journal prompt of the day
@@ -986,8 +906,6 @@ export default function App() {
   // ── LOAD ─────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
       setLoadError(false);
-      // Captured before anything can write, so it reflects the state at boot.
-      const hadSnapshot = hasLocalSnapshot();
       const today = todayKey();
       const mode  = getModeForDate(today);
       const dkey  = getDayKey(today, mode);
@@ -1008,21 +926,12 @@ export default function App() {
           timeout,
         ]);
         const [ds,ws,ms,as,ij,plt,g,fl,fin,xp,s,ach,tl,tm,dest,jrnl,wp,pa,tod,cl,hist] = results;
-
-        // Cold start with no network AND no cache: nothing real was read.
-        // Bail out before applying or writing anything. If we rendered
-        // defaults here, the weekly grace accrual and arc snapshot below
-        // would queue those defaults and overwrite live server data the
-        // moment the connection came back.
-        if(isDegraded() && !hadSnapshot){
-          setLoadError(true); setLoading(false); return;
-        }
         if(ds)  setDayStates(p=>({...p,[dkey]:ds}));
         if(ws)  setWeeklyState(ws); if(ms)  setMonthlyState(ms);
         if(as)  setAnnualState(as); if(ij)  setIjmState(ij);
         if(plt) setPlatState(plt);  if(g)   setGoals(g);
         if(fl) setFriendLog(fl);
-        if(fin) setFinancials(fin); if(xp!==null&&xp!==undefined){ setTotalXP(xp); xpRef.current = xp; }
+        if(fin) setFinancials(fin); if(xp)  setTotalXP(xp);
         if(s)   setStreaks(s);      if(ach) setUnlockedAch(ach);
         if(tl)  setTripLog(tl);    if(tm)  setTravelMode(tm);
         if(dest)setTravelDest(dest);
@@ -1059,7 +968,10 @@ export default function App() {
                 return ps?{...s,done:!!ps.done}:s;
               })};
           });
-          const custom = savedArcs.filter(a=>!DEFAULT_ARCS.some(d=>d.id===a.id));
+          // Without the RETIRED filter, an arc removed from DEFAULT_ARCS gets
+          // treated as a user-created custom arc and survives forever.
+          const custom = savedArcs.filter(a=>
+            !DEFAULT_ARCS.some(d=>d.id===a.id) && !RETIRED_ARC_IDS.includes(a.id));
           setArcs([...merged,...custom]);
         }
         // If travel mode was active, also load the travel checklist for today
@@ -1070,7 +982,8 @@ export default function App() {
         }
         if(jrnl){setJournal(jrnl);setJournalInput(jrnl[today]||"");}
         if(wp)  setWeekPlan(wp);   if(pa)  setPlanArchive(pa);
-        if(tod) setTodos(tod);     if(cl)  setCustomLists(cl);
+        if(tod) setTodos(tod);
+        if(cl)  setCustomLists(migrateLists(cl));
         if(hist)setHistory(hist);
         // History is stored per calendar year. A 120-day momentum window
         // crosses Jan 1, so without last year's slice every January would
@@ -1087,7 +1000,6 @@ export default function App() {
         if(cats && cats.length>0) setCategories(cats);
 
         // ── Engagement layer ──
-        const ab = await load("wb-arc-bonus-v1"); if(ab) setArcBonus(ab);
         const hs = await load("wb-health-streak"); if(hs) setHealthStreak(hs);
         const mAck = await load("wb-milestone-ack"); if(mAck) setMilestoneAck(mAck);
         const restDay = await load(`wb-restday-${today}`); if(restDay) setRestDayToday(true);
@@ -1109,28 +1021,12 @@ export default function App() {
         setLoading(false);
       } catch(e){
         console.error("Load error:",e);
-        // Showing the user their day matters more than proving the server is
-        // reachable. If anything has ever been cached locally, render it and
-        // reconcile in the background; the sync chip says we are offline.
-        // The hard error screen is only for a genuine cold start with no data.
-        if(hasLocalSnapshot()) setLoadError(false);
-        else setLoadError(true);
+        setLoadError(true);
         setLoading(false);
       }
   }, []);
 
   useEffect(()=>{ loadAll(); },[loadAll]);
-
-  // Sync status feed from the write queue.
-  useEffect(()=>subscribeSync((status,pending)=>setSyncState({status,pending})),[]);
-
-  // Flush anything queued before the tab goes away or the user switches tabs.
-  useEffect(()=>{
-    const onHide=()=>{ flushJournalRef.current?.(); flushPending(); };
-    window.addEventListener("pagehide",onHide);
-    document.addEventListener("visibilitychange",onHide);
-    return ()=>{ window.removeEventListener("pagehide",onHide); document.removeEventListener("visibilitychange",onHide); };
-  },[]);
 
   // ── DERIVED STATE ────────────────────────────────────────────────────
   const today     = todayKey();
@@ -1159,16 +1055,21 @@ export default function App() {
   const keystoneMode = todayMode === "travel" ? "travel" : getModeForDate(today);
   const isSabbathToday = keystoneMode === "sunday";
 
+  // Once today's keystone is done, the rotation STOPS. The id that was
+  // completed is looked up and pinned for the rest of the day, so finishing
+  // the one thing is not immediately answered with another one thing.
+  const completedKeystoneId = keystoneDoneMap[today] || null;
+  const pinnedKeystone = completedKeystoneId
+    ? KEYSTONE_LIBRARY.find(k => k.id === completedKeystoneId) || null
+    : null;
   const libraryKeystone = isSabbathToday ? null : pickKeystone({
     mode: keystoneMode,
     dayOfYear: dayOfYearNow + keystoneSkip,
     recentIds: recentKeystones,
   });
-  // Manual override still supported: tapping "show me another" advances the
-  // rotation rather than falling back to a checklist item.
-  const keystoneItem = libraryKeystone;
+  const keystoneItem = pinnedKeystone || libraryKeystone;
   const sabbathInvitation = isSabbathToday ? pickSabbathInvitation(dayOfYearNow) : null;
-  const keystoneDone = keystoneItem ? !!keystoneDoneMap[today] : false;
+  const keystoneDone = !!completedKeystoneId;
   const maintenanceItems = coreItems;
   const bonusItems = todayItems.filter(i=>i.w==="bonus");
   const maintDoneCount = maintenanceItems.filter(i=>todayState[i.id]?.checked).length;
@@ -1239,6 +1140,33 @@ export default function App() {
   })();
 
 
+  // ── DAYS KEPT — the only accumulating number in the app ─────────────
+  // A day counts if dayTier() resolves it: keystone done, half the core list
+  // done, or a Sabbath / declared rest day. It cannot be inflated by adding
+  // checkboxes, which is exactly why it can carry the level ladder.
+  const daysKept = (()=>{
+    const seen = new Set([...Object.keys(history||{}), ...Object.keys(keystoneDoneMap||{})]);
+    let n = 0;
+    seen.forEach(ds=>{ if(/^\d{4}-\d{2}-\d{2}$/.test(ds) && dayTier(ds)) n++; });
+    return n;
+  })();
+  const journey = journeyLevelFor(daysKept);
+
+  // Points are a WEEKLY figure, derived from history. A lifetime counter can
+  // only ever answer "how long have I had this app", which is why the old
+  // total read as meaningless.
+  const weekPts = (()=>{
+    const d = new Date();
+    const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7));
+    let t = 0;
+    for(let i=0;i<7;i++){
+      const x = new Date(mon); x.setDate(mon.getDate()+i);
+      const ds = localDate(x);
+      if(ds <= today) t += (history[ds]?.pts||0);
+    }
+    return t;
+  })();
+
   const todayPts  = todayItems.reduce((s,i)=>s+(todayState[i.id]?.checked?i.xp:0),0);
   const todayMax  = todayItems.reduce((s,i)=>s+i.xp,0);
   const todayPct  = todayMax>0?Math.round(todayPts/todayMax*100):0;
@@ -1254,8 +1182,7 @@ export default function App() {
   const domainProgress = Object.keys(DOMAIN_CFG).reduce((acc,d)=>{
     const dg=goals.filter(g=>g.domain===d); acc[d]=dg.length?Math.round(dg.reduce((s,g)=>s+(g.progress||0),0)/dg.length):0; return acc;
   },{});
-  const stats = {totalXP,streak:streaks.current,totalDays:streaks.totalDays||0,sabbaths:streaks.sabbaths||0,goalsComplete,practiceSessions:streaks.practiceSessions||0,friendDinners:streaks.friendDinners||0,tripCount:streaks.tripCount||0};
-  const levelInfo = getLevelInfo(totalXP);
+  const stats = {totalXP,daysKept,streak:streaks.current,totalDays:streaks.totalDays||0,sabbaths:streaks.sabbaths||0,goalsComplete,practiceSessions:streaks.practiceSessions||0,friendDinners:streaks.friendDinners||0,tripCount:streaks.tripCount||0};
   const scripture = getDailyScripture();
   const filteredGoals = domainFilter==="all"?goals:goals.filter(g=>g.domain===domainFilter);
   const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -1267,7 +1194,7 @@ export default function App() {
     const nu={...unlockedAch};let changed=false;
     ACHIEVEMENTS.forEach(a=>{if(!nu[a.id]&&a.check(stats)){nu[a.id]=true;changed=true;showToast(`🏆 ${a.title} unlocked!`);}});
     if(changed){setUnlockedAch(nu);save("wb-ach-v3",nu);}
-  },[totalXP,streaks.current,goalsComplete]);
+  },[totalXP,daysKept,streaks.current,goalsComplete]);
 
   // Confetti
   useEffect(()=>{
@@ -1296,7 +1223,8 @@ export default function App() {
     await save(key,ns);
     const items = lists[modeForOp]||lists.weekday;
     await writeHistory(dateForOp,ns,items);
-    const nxp = await adjustXP(nowChecked ? item.xp : -item.xp);
+    const nxp = Math.max(0,totalXP+(nowChecked?item.xp:-item.xp));
+    setTotalXP(nxp); await save("wb-totalxp",nxp);
     if(nowChecked){setBouncing(itemId);setTimeout(()=>setBouncing(null),450);setXpFloat(item.xp);setTimeout(()=>setXpFloat(null),1300);}
     // Stakes streaks — core tasks only (bonus tasks never gate a streak).
     // Only evaluated for today, not past-day edits.
@@ -1314,9 +1242,11 @@ export default function App() {
         const sabbBonus = modeForOp==="sunday"?1:0;
         const nst = {...streaks,...mainAdvance.streak,totalDays:(streaks.totalDays||0)+1,sabbaths:(streaks.sabbaths||0)+sabbBonus};
         setStreaks(nst); await save("wb-streaks-v4",nst);
-        const bonus = 50 + mainAdvance.streak.current*10;
-        runningXP = await adjustXP(bonus);
-        showToast(`${mainAdvance.streak.current>1?`🔥 ${mainAdvance.streak.current}-day streak!`:"🏆 Day complete!"} +${bonus} bonus pts`);
+        // Flat. The old bonus was 50 + streak x 10, which paid 650 for one
+        // tap at a 60-day streak and made every other number in the app noise.
+        const bonus = WEIGHTS.dayClose;
+        runningXP = runningXP + bonus; setTotalXP(runningXP); await save("wb-totalxp",runningXP);
+        showToast(`${mainAdvance.streak.current>1?`🔥 ${mainAdvance.streak.current}-day streak`:"🏆 Day closed"} +${bonus}`);
         const ms = checkMilestone(streaks.current, mainAdvance.streak.current, milestoneAck.main);
         if(ms) newMilestones.push({...ms,streakId:"main",streakLabel:"Main streak"});
       }
@@ -1374,7 +1304,7 @@ export default function App() {
     const cur=stateRef[itemId]; const nowChecked=!cur?.checked;
     const ns={...stateRef,[itemId]:{checked:nowChecked,at:new Date().toISOString()}};
     stateSetter(ns); await save(saveKey,ns);
-    await adjustXP(nowChecked ? item.xp : -item.xp);
+    const nxp=Math.max(0,totalXP+(nowChecked?item.xp:-item.xp)); setTotalXP(nxp); await save("wb-totalxp",nxp);
     if(nowChecked){setBouncing(itemId);setTimeout(()=>setBouncing(null),450);setXpFloat(item.xp);setTimeout(()=>setXpFloat(null),1300);}
   },[totalXP]);
 
@@ -1513,34 +1443,6 @@ export default function App() {
   };
 
   // ── JOURNAL ──────────────────────────────────────────────────────────
-  // Journal used to upsert the entire year's object on every keystroke.
-  // Now: local state updates immediately, persistence is debounced, and the
-  // pending write is flushed on blur, tab change and page hide so nothing is
-  // lost. journalDirtyRef holds the text that has not reached save() yet.
-  const journalTimer = useRef(null);
-  const journalDirtyRef = useRef(null);
-
-  const flushJournal = useCallback(async ()=>{
-    if(journalTimer.current){ clearTimeout(journalTimer.current); journalTimer.current=null; }
-    const text = journalDirtyRef.current;
-    if(text===null||text===undefined) return;
-    journalDirtyRef.current = null;
-    setJournal(prev=>{
-      const upd={...prev,[today]:text};
-      save(`wb-journal-${yearKey()}`,upd);
-      return upd;
-    });
-  },[today]);
-
-  flushJournalRef.current = flushJournal;
-
-  const onJournalChange=(text)=>{
-    setJournalInput(text);
-    journalDirtyRef.current = text;
-    if(journalTimer.current) clearTimeout(journalTimer.current);
-    journalTimer.current = setTimeout(()=>{ flushJournal(); }, 800);
-  };
-
   const saveJournalEntry=async(text)=>{
     setJournalInput(text);
     const upd={...journal,[today]:text};setJournal(upd);await save(`wb-journal-${yearKey()}`,upd);
@@ -1560,14 +1462,10 @@ export default function App() {
       const nextRecent = [keystoneItem.id, ...recentKeystones].slice(0,20);
       setRecentKeystones(nextRecent);
       await save("wb-keystone-recent", nextRecent);
-      await adjustXP(KEYSTONE_XP);
-      showToast("✦ Keystone done. +40 pts");
-    } else {
-      // Undoing has to give the points back, or the keystone can be farmed
-      // by ticking and unticking. Recency history is left alone deliberately:
-      // the prompt was surfaced, so it should still cool down.
-      await adjustXP(-KEYSTONE_XP);
-      showToast("Keystone reopened. −40 pts");
+      const nxp = totalXP + WEIGHTS.move;
+      setTotalXP(nxp); await save("wb-totalxp", nxp);
+      setKeystoneSkip(0); // rotation stops for the day
+      showToast(`✦ Keystone kept. +${WEIGHTS.move}`);
     }
   };
   const skipKeystone=()=>setKeystoneSkip(s=>s+1);
@@ -1580,40 +1478,21 @@ export default function App() {
     setArcs(u); await save("wb-arcs-v1", u);
     const arc = u.find(a=>a.id===arcId);
     const step = (arc?.steps||[]).find(s=>s.id===stepId);
-
-    // Step points mirror on undo.
-    await adjustXP(step?.done ? ARC_STEP_XP : -ARC_STEP_XP);
-
-    // The completion bonus is awarded at most once per arc, tracked
-    // separately. It used to re-fire every time any step of a finished arc
-    // was unticked and reticked.
-    const complete = isArcComplete(arc);
-    const alreadyBonused = !!arcBonus[arcId];
-    if(complete && !alreadyBonused){
-      const nb = {...arcBonus, [arcId]: true};
-      setArcBonus(nb); await save("wb-arc-bonus-v1", nb);
-      await adjustXP(ARC_COMPLETE_XP);
-      showToast(`🎯 "${arc.title}" complete! +${ARC_STEP_XP + ARC_COMPLETE_XP} pts`);
-    } else if(!complete && alreadyBonused){
-      const nb = {...arcBonus}; delete nb[arcId];
-      setArcBonus(nb); await save("wb-arc-bonus-v1", nb);
-      await adjustXP(-ARC_COMPLETE_XP);
-      showToast(`"${arc.title}" reopened. −${ARC_COMPLETE_XP} pts`);
-    } else {
-      showToast(step?.done ? `Step forward. +${ARC_STEP_XP} pts` : `Step reopened. −${ARC_STEP_XP} pts`);
+    if(step?.done){
+      const nxp = totalXP + WEIGHTS.arcStep;
+      setTotalXP(nxp); await save("wb-totalxp", nxp);
+      if(isArcComplete(arc)){
+        const bonus = nxp + WEIGHTS.arcDone;
+        setTotalXP(bonus); await save("wb-totalxp", bonus);
+        showToast(`🎯 "${arc.title}" closed. +${WEIGHTS.arcStep + WEIGHTS.arcDone}`);
+      } else {
+        showToast(`Step forward. +${WEIGHTS.arcStep}`);
+      }
     }
   };
   const cycleArc=()=>setArcOffset(o=>o+1);
 
-  const toggleGoalDone=async(id)=>{
-    const g=goals.find(x=>x.id===id); if(!g) return;
-    const u=goals.map(x=>x.id===id?{...x,completed:!x.completed,progress:!x.completed?100:x.progress}:x);
-    setGoals(u); await save("wb-goals-v5",u);
-    // Reopening a goal refunds the award. Without this, complete → reopen →
-    // complete paid out every cycle.
-    if(!g.completed){ await adjustXP(GOAL_XP); showToast(`🎯 Goal complete! +${GOAL_XP} pts`); }
-    else { await adjustXP(-GOAL_XP); showToast(`Goal reopened. −${GOAL_XP} pts`); }
-  };
+  const toggleGoalDone=async(id)=>{const g=goals.find(x=>x.id===id);const u=goals.map(x=>x.id===id?{...x,completed:!x.completed,progress:!x.completed?100:x.progress}:x);setGoals(u);await save("wb-goals-v5",u);if(!g.completed){const nxp=totalXP+WEIGHTS.arcDone;setTotalXP(nxp);await save("wb-totalxp",nxp);showToast(`🎯 Goal complete. +${WEIGHTS.arcDone}`);}};
   const updateGoalProgress=(id,progress)=>setGoals(g=>g.map(x=>x.id===id?{...x,progress}:x));
   const saveGoalProgress=async()=>await save("wb-goals-v5",goals);
   const updateGoalNote=async(id,notes)=>{const u=goals.map(g=>g.id===id?{...g,notes}:g);setGoals(u);await save("wb-goals-v5",u);};
@@ -1675,17 +1554,12 @@ export default function App() {
   const logWorkout = async(dayKey, type) => {
     const nw = {...workoutLog, [dayKey]:{type,at:new Date().toISOString()}};
     setWorkoutLog(nw); await save(`wb-workouts-${weekKey()}`, nw);
-    // Only award if this day did not already hold a logged workout — changing
-    // the type of an existing entry is an edit, not a new session.
-    if(!workoutLog[dayKey]) await adjustXP(WORKOUT_XP);
-    showToast(`💪 ${type} logged +${WORKOUT_XP} pts`);
+    const nxp=totalXP+20; setTotalXP(nxp); await save("wb-totalxp",nxp);
+    showToast(`💪 ${type} logged +20 pts`);
   };
   const removeWorkout = async(dayKey) => {
-    const had = !!workoutLog[dayKey];
     const nw = {...workoutLog}; delete nw[dayKey];
     setWorkoutLog(nw); await save(`wb-workouts-${weekKey()}`, nw);
-    // Removing a workout has to take the points back with it.
-    if(had) await adjustXP(-WORKOUT_XP);
   };
 
   const saveCats = async(cats) => { setCategories(cats); await save("wb-categories-v1", cats); };
@@ -1808,7 +1682,7 @@ export default function App() {
           bonusXP={milestoneQueue[0].major?MILESTONE_BONUS_XP.major:MILESTONE_BONUS_XP.minor}
           onDismiss={async()=>{
             const bonus = milestoneQueue[0].major?MILESTONE_BONUS_XP.major:MILESTONE_BONUS_XP.minor;
-            await adjustXP(bonus);
+            const nxp = totalXP+bonus; setTotalXP(nxp); await save("wb-totalxp",nxp);
             dismissMilestone();
           }}
         />
@@ -1911,15 +1785,13 @@ export default function App() {
           <div className="hdr-inner">
             <div className="hdr-left">
               {/* AVATAR / APP ICON */}
-              <button type="button" aria-label="Change profile photo" aria-expanded={showAvatarMenu}
-                style={{position:"relative",cursor:"pointer",background:"none",border:"none",padding:0,lineHeight:0}}
-                onClick={()=>setShowAvatarMenu(p=>!p)}>
+              <div style={{position:"relative",cursor:"pointer"}} onClick={()=>setShowAvatarMenu(p=>!p)}>
                 {avatar
                   ? <img src={avatar} style={{width:36,height:36,borderRadius:8,objectFit:"cover",border:"1px solid rgba(35,181,211,0.3)"}} alt="You"/>
                   : <AppIcon size={36}/>
                 }
-                <span aria-hidden="true" style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:"50%",background:"#2B5F7D",border:"2px solid #10171C",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#10171C",fontWeight:900}}>✎</span>
-              </button>
+                <div style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:"50%",background:"#2B5F7D",border:"2px solid #10171C",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#10171C",fontWeight:900}}>✎</div>
+              </div>
               {/* AVATAR MENU */}
               {showAvatarMenu&&(
                 <div style={{position:"absolute",top:60,left:18,background:"#121A1E",border:"1px solid rgba(35,181,211,0.2)",borderRadius:10,padding:8,zIndex:100,boxShadow:"0 8px 32px rgba(0,0,0,0.6)",minWidth:180}}>
@@ -1935,8 +1807,7 @@ export default function App() {
               </div>
             </div>
             <div className="hdr-right">
-              <SyncChip state={syncState} onRetry={()=>retrySync()}/>
-              <button className="gear-btn" onClick={openEditor} title="Edit checklists" aria-label="Edit checklists">⚙️</button>
+              <button className="gear-btn" onClick={openEditor} title="Edit checklists">⚙️</button>
               <button className={`travel-toggle ${travelMode?"on":"off"}`} onClick={travelMode?disableTravel:()=>setShowTM(true)}>✈️ {travelMode?"Road":"Travel"}</button>
             </div>
           </div>
@@ -1957,24 +1828,28 @@ export default function App() {
                     </div>
                     <div className="pts-right">
                       <span className="pts-icon">{todayMode==="sunday"?"🕊️":todayMode==="saturday"?"🌄":travelMode?"✈️":"☀️"}</span>
-                      <div className="pts-streak">🔥 {momentum.current}-day run</div>
+                      <div className="pts-streak">🔥 {streaks.current}-day streak</div>
                       {consistency14!==null&&<div className="pts-streak" style={{color:"rgba(255,255,255,0.5)",marginTop:2}}>the return is the win — {consistency14}% these 2 weeks</div>}
                     </div>
                   </div>
                   <div className="h-prog-row"><div className="h-prog-label">Today's completion</div><div className="h-prog-pct">{viewDate?(history[viewDate]?.pct||0):todayPct}%</div></div>
                   <div className="h-track"><div className={fillClass()} style={{width:`${viewDate?(history[viewDate]?.pct||0):todayPct}%`}}/></div>
                   <div className="h-stats">
-                    <div className="h-stat"><div className="h-stat-val">{totalXP}</div><div className="h-stat-lbl">Total Pts</div></div>
-                    <div className="h-stat"><div className="h-stat-val">{momentum.best}</div><div className="h-stat-lbl">Best Run</div></div>
-                    <div className="h-stat"><div className="h-stat-val">{goalsComplete}/{goals.length}</div><div className="h-stat-lbl">Goals</div></div>
+                    <div className="h-stat"><div className="h-stat-val">{daysKept}</div><div className="h-stat-lbl">Days Kept</div></div>
+                    <div className="h-stat"><div className="h-stat-val">{weekPts}</div><div className="h-stat-lbl">Pts This Week</div></div>
+                    <div className="h-stat"><div className="h-stat-val">{streaks.longest}</div><div className="h-stat-lbl">Best Streak</div></div>
                   </div>
                 </div>
               </div>
 
-              <div className="xp-card">
-                <div className="xp-row"><div className="xp-level">Level {levelInfo.l} — {levelInfo.t}</div><div className="xp-pts">{totalXP} pts</div></div>
-                <div className="xp-track"><div className="xp-fill" style={{width:`${levelInfo.progress}%`}}/></div>
-              </div>
+              <button className="xp-card" onClick={()=>setTab("journey")} style={{display:"block",width:"100%",textAlign:"left",cursor:"pointer"}}>
+                <div className="xp-row">
+                  <div className="xp-level">Level {journey.l} — {journey.title}</div>
+                  <div className="xp-pts">{journey.next?`${journey.daysToNext} days to go ›`:"Furthest mark ›"}</div>
+                </div>
+                <div className="xp-track"><div className="xp-fill" style={{width:`${journey.progress}%`}}/></div>
+                <div style={{fontSize:11,color:"#8B99A3",fontWeight:600,marginTop:7}}>{daysKept} days kept{journey.next?` · next: ${journey.next.title}`:""}</div>
+              </button>
 
               {todayMode==="sunday"&&!viewDate&&<div className="mode-badge mode-badge-sun"><span style={{fontSize:18}}>🕊️</span><div><div className="mb-text">Sabbath Sunday</div><div className="mb-sub">Rest, church, presence. Nothing else required.</div></div></div>}
               {todayMode==="saturday"&&!viewDate&&<div className="mode-badge mode-badge-sat"><span style={{fontSize:18}}>🌄</span><div><div className="mb-text">Family Saturday</div><div className="mb-sub">River, Annie, Jules, music. All that matters today.</div></div></div>}
@@ -2017,6 +1892,26 @@ export default function App() {
                     <strong style={{fontWeight:800}}>Health run: {healthStreak.current} days.</strong> Tracked separately —
                     counts any day the health items on the core list were done.
                   </div>
+                  <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(35,181,211,0.18)"}}>
+                    <button onClick={()=>setShowWeights(v=>!v)} style={{background:"none",border:"none",padding:0,fontSize:12.5,fontWeight:800,color:"#17384A",cursor:"pointer"}}>
+                      What a point is {showWeights?"▾":"▸"}
+                    </button>
+                    {showWeights&&(
+                      <div style={{marginTop:8,display:"grid",gap:7}}>
+                        {WEIGHT_LEGEND.map(w=>(
+                          <div key={w.label} style={{display:"flex",gap:10,alignItems:"baseline"}}>
+                            <span style={{minWidth:26,fontWeight:900,color:"#2B5F7D",fontSize:13}}>{w.pts}</span>
+                            <span><strong style={{fontWeight:800}}>{w.label}.</strong> {w.detail}</span>
+                          </div>
+                        ))}
+                        <div style={{marginTop:4,paddingTop:8,borderTop:"1px solid rgba(35,181,211,0.14)",color:"#54646F"}}>
+                          Closing a day adds a flat {WEIGHTS.dayClose}. It used to add 50 plus ten per streak day,
+                          which is why the totals stopped meaning anything. Points measure what a thing weighs,
+                          not how many times you tapped. Levels are counted in days kept, never in points.
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2033,15 +1928,14 @@ export default function App() {
                   {pastDays.map(ds=>{
                     const d=new Date(ds+"T12:00:00");const isToday=ds===today;const isViewing=viewDate===ds;const dc=dotColor(ds);
                     return(
-                      <button key={ds} type="button" className="day-chip" onClick={()=>viewPastDay(ds)}
-                        aria-label={`View ${new Date(ds+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}`}>
+                      <div key={ds} className="day-chip" onClick={()=>viewPastDay(ds)}>
                         <div className={`day-chip-inner ${isToday?"today":""} ${isViewing?"viewing":""}`}>
                           <div className="day-chip-dow">{DAYS[d.getDay()]}</div>
                           <div className="day-chip-num">{d.getDate()}</div>
                           {dc&&<div className="day-dot" style={{background:dc}}/>}
                           {isToday&&!viewDate&&<div className="day-dot" style={{background:"#35617E"}}/>}
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -2090,7 +1984,7 @@ export default function App() {
                   {keystoneItem && !isSabbathToday && (
                     <div style={{background:"linear-gradient(145deg,#1B3443,#2F5C74)",borderRadius:20,padding:22,marginBottom:14,position:"relative",overflow:"hidden",boxShadow:"0 8px 24px rgba(35,181,211,0.25)"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8}}>
-                        <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.75)",background:"rgba(255,255,255,0.15)",display:"inline-block",padding:"4px 10px",borderRadius:100}}>Today's Keystone</div>
+                        <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.75)",background:"rgba(255,255,255,0.15)",display:"inline-block",padding:"4px 10px",borderRadius:100}}>{keystoneDone?"Keystone kept":"Today's Keystone"}</div>
                         <div style={{fontSize:9.5,fontWeight:800,letterSpacing:"0.1em",textTransform:"uppercase",color:"rgba(255,255,255,0.6)"}}>{keystoneItem.domain}</div>
                       </div>
                       <div style={{fontSize:21,fontWeight:800,color:"#fff",marginBottom:14,lineHeight:1.25}}>{keystoneItem.text}</div>
@@ -2108,8 +2002,18 @@ export default function App() {
                         <button onClick={completeKeystone} style={{background:keystoneDone?"rgba(255,255,255,0.22)":"#fff",color:keystoneDone?"#fff":"#17384A",border:"none",borderRadius:100,padding:"10px 20px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
                           {keystoneDone?"✓ Done today":"Mark complete"}
                         </button>
-                        <button onClick={skipKeystone} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>Not today — show another</button>
+                        {/* The rotation is only offered while the day is still open.
+                            Finishing the one thing should not be answered with another
+                            one thing — that turns a keystone into a treadmill. */}
+                        {!keystoneDone&&(
+                          <button onClick={skipKeystone} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>Not today — show another</button>
+                        )}
                       </div>
+                      {keystoneDone&&(
+                        <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid rgba(255,255,255,0.18)",fontSize:11.5,color:"rgba(255,255,255,0.78)",lineHeight:1.6}}>
+                          That was the one that mattered. Nothing else gets assigned today — anything below is optional.
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2169,37 +2073,14 @@ export default function App() {
                     )}
                   </div>
 
-                  {surfacedArc && (
-                    <>
-                      <div className="sec">
-                        <div className="sec-title">The Larger Arc</div>
-                        <button onClick={cycleArc} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#2B5F7D",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Another ›</button>
+                  {surfacedArc && surfacedArcNext && (
+                    <button onClick={()=>setTab("journey")} style={{display:"flex",width:"100%",alignItems:"center",gap:10,textAlign:"left",background:"#F5F7F8",border:"1px solid #D3DBE0",borderLeft:`3px solid ${DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"}`,borderRadius:12,padding:"11px 14px",marginBottom:12,cursor:"pointer"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.1em",textTransform:"uppercase",color:"#8B99A3",marginBottom:3}}>Next on {surfacedArc.title}</div>
+                        <div style={{fontSize:13,color:"#17384A",lineHeight:1.45,fontWeight:600}}>{surfacedArcNext.text}</div>
                       </div>
-                      <div className="g-card" style={{borderLeft:`3px solid ${DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"}`}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10}}>
-                          <div style={{fontSize:15,fontWeight:700,color:"#121A20",marginBottom:4}}>{surfacedArc.title}</div>
-                          <div style={{fontSize:10.5,fontWeight:800,color:"#94A3B8",whiteSpace:"nowrap"}}>{surfacedArcDone}/{(surfacedArc.steps||[]).length}</div>
-                        </div>
-                        <div style={{fontSize:12,color:"#64748B",marginBottom:12}}>{surfacedArc.detail}</div>
-                        <div style={{display:"grid",gap:2}}>
-                          {(surfacedArc.steps||[]).map(st=>(
-                            <button key={st.id} onClick={()=>toggleArcStep(surfacedArc.id,st.id)}
-                              style={{display:"flex",alignItems:"flex-start",gap:9,textAlign:"left",background:"none",border:"none",padding:"7px 0",cursor:"pointer",width:"100%"}}>
-                              <span style={{flexShrink:0,width:17,height:17,borderRadius:5,marginTop:1,
-                                border:st.done?"none":"1.5px solid #CBD5E1",
-                                background:st.done?(DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"):"transparent",
-                                color:"#fff",fontSize:11,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{st.done?"✓":""}</span>
-                              <span style={{fontSize:13,lineHeight:1.45,color:st.done?"#94A3B8":"#334155",textDecoration:st.done?"line-through":"none"}}>{st.text}</span>
-                            </button>
-                          ))}
-                        </div>
-                        {surfacedArcNext && (
-                          <div style={{marginTop:12,paddingTop:11,borderTop:"1px solid #E8EEF2",fontSize:11.5,color:"#17384A",lineHeight:1.5}}>
-                            <strong style={{fontWeight:800}}>Next:</strong> {surfacedArcNext.text}
-                          </div>
-                        )}
-                      </div>
-                    </>
+                      <div style={{fontSize:11,fontWeight:800,color:"#2B5F7D",whiteSpace:"nowrap"}}>{surfacedArcDone}/{(surfacedArc.steps||[]).length} ›</div>
+                    </button>
                   )}
 
                   <div className="sec"><div className="sec-title">Quick Capture</div><div className="sec-sub">keep the useful bits close</div></div>
@@ -2276,16 +2157,12 @@ export default function App() {
                     return(
                       <div key={cat.id} className="cat-section">
                         {/* Category header */}
-                        <div className="cat-header">
-                          <button type="button" className="cat-toggle" aria-expanded={!cat.collapsed}
-                            aria-label={`${cat.collapsed?"Expand":"Collapse"} ${cat.name}`}
-                            onClick={()=>toggleCatCollapse(cat.id)}>
-                            <span className="cat-chevron" aria-hidden="true" style={{transform:cat.collapsed?"rotate(-90deg)":"rotate(0deg)"}}>
-                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8B99A3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="2 4 6 8 10 4"/>
-                              </svg>
-                            </span>
-                          </button>
+                        <div className="cat-header" onClick={()=>toggleCatCollapse(cat.id)}>
+                          <div className="cat-chevron" style={{transform:cat.collapsed?"rotate(-90deg)":"rotate(0deg)"}}>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8B99A3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="2 4 6 8 10 4"/>
+                            </svg>
+                          </div>
                           {editCatId===cat.id?(
                             <input
                               className="cat-rename-input"
@@ -2296,9 +2173,7 @@ export default function App() {
                               onClick={e=>e.stopPropagation()}
                             />
                           ):(
-                            <button type="button" className="cat-header-name" style={{background:"none",border:"none",padding:0,font:"inherit",cursor:"pointer",textAlign:"left"}}
-                              onClick={()=>toggleCatCollapse(cat.id)}
-                              onDoubleClick={e=>{e.stopPropagation();setEditCatId(cat.id);}}>{cat.name}</button>
+                            <div className="cat-header-name" onDoubleClick={e=>{e.stopPropagation();setEditCatId(cat.id);}}>{cat.name}</div>
                           )}
                           <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:"auto"}}>
                             {cat.collapsed&&total>0&&(
@@ -2308,17 +2183,7 @@ export default function App() {
                               <button onClick={async e=>{e.stopPropagation();const u=todos.filter(t=>!((t.categoryId||"cat-default")===cat.id&&t.done));setTodos(u);await save("wb-todos-v1",u);}} className="cat-clear-btn">Clear done</button>
                             )}
                             {cat.id!=="cat-default"&&(
-                              <button
-                                aria-label={`Delete category ${cat.name}`}
-                                onClick={e=>{
-                                  e.stopPropagation();
-                                  // Both branches used to call deleteCategory — cancelling
-                                  // destroyed the category anyway. Delete only on confirm.
-                                  const ok = typeof window.confirm === "function"
-                                    ? window.confirm(`Delete "${cat.name}"? Tasks in it will be removed.`)
-                                    : true;
-                                  if(ok) deleteCategory(cat.id);
-                                }} className="cat-del-btn">✕</button>
+                              <button onClick={async e=>{e.stopPropagation();if(window.confirm&&window.confirm("Delete this category?"))deleteCategory(cat.id);else deleteCategory(cat.id);}} className="cat-del-btn">✕</button>
                             )}
                           </div>
                         </div>
@@ -2334,15 +2199,10 @@ export default function App() {
                             {catTodos.map(todo=>(
                               <div key={todo.id} style={{borderBottom:"1px solid rgba(11,25,41,0.04)"}}>
                                 <div className="c-row" style={{borderBottom:"none"}}>
-                                  <button type="button" role="checkbox" aria-checked={!!todo.done} aria-label={todo.text}
-                                    className="row-btn"
-                                    onClick={()=>toggleTodo(todo.id)}
-                                    style={{display:"flex",alignItems:"center",gap:13,flex:1,minWidth:0,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",font:"inherit"}}>
-                                    <span className={`todo-circle ${todo.done?"done":""}`} aria-hidden="true"/>
-                                    <span className="c-body" style={{minWidth:0}}>
-                                      <span className="c-main" style={{display:"block",color:todo.done?"#8B99A3":"#10171C",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</span>
-                                    </span>
-                                  </button>
+                                  <div className={`todo-circle ${todo.done?"done":""}`} onClick={()=>toggleTodo(todo.id)}/>
+                                  <div className="c-body" onClick={()=>toggleTodo(todo.id)} style={{cursor:"pointer"}}>
+                                    <div className="c-main" style={{color:todo.done?"#8B99A3":"#10171C",textDecoration:todo.done?"line-through":"none"}}>{todo.text}</div>
+                                  </div>
                                   <button
                                     onClick={()=>setAddingSubFor(addingSubFor===todo.id?null:todo.id)}
                                     title="Add sub-item"
@@ -2355,12 +2215,8 @@ export default function App() {
                                   <div style={{paddingLeft:34,paddingBottom:6}}>
                                     {todo.subitems.map(sub=>(
                                       <div key={sub.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px 6px 0"}}>
-                                        <button type="button" role="checkbox" aria-checked={!!sub.done} aria-label={sub.text}
-                                          onClick={()=>toggleSubTodo(todo.id,sub.id)}
-                                          style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",font:"inherit"}}>
-                                          <span className={`todo-circle ${sub.done?"done":""}`} aria-hidden="true" style={{width:16,height:16,flexShrink:0}}/>
-                                          <span style={{flex:1,fontSize:12.5,color:sub.done?"#8B99A3":"#454F56",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</span>
-                                        </button>
+                                        <div className={`todo-circle ${sub.done?"done":""}`} style={{width:16,height:16,flexShrink:0}} onClick={()=>toggleSubTodo(todo.id,sub.id)}/>
+                                        <div onClick={()=>toggleSubTodo(todo.id,sub.id)} style={{flex:1,cursor:"pointer",fontSize:12.5,color:sub.done?"#8B99A3":"#454F56",textDecoration:sub.done?"line-through":"none"}}>{sub.text}</div>
                                         <button className="todo-del" style={{fontSize:14}} onClick={()=>deleteSubTodo(todo.id,sub.id)}>×</button>
                                       </div>
                                     ))}
@@ -2401,7 +2257,7 @@ export default function App() {
           {/* ══ PROGRESS SUB-NAV (Stats / Rhythms / Platform / Health) ═══ */}
           {tab==="progress"&&(
             <div className="r-tabs" style={{marginTop:8}}>
-              {[["stats","Stats"],["rhythms","Rhythms"],["platform","Platform"],["health","Health"]].map(([k,l])=>(
+              {[["stats","Stats"],["rhythms","Rhythms"],["health","Health"]].map(([k,l])=>(
                 <button key={k} className={`r-tab ${progressSubTab===k?"active":""}`} onClick={()=>setProgressSubTab(k)}>{l}</button>
               ))}
             </div>
@@ -2430,11 +2286,11 @@ export default function App() {
               {rhythmTab==="monthly"&&(
                 <>
                   <div className="sec"><div className="sec-title">This Month</div></div>
-                  <button type="button" className="prompt-card" onClick={()=>setShowFF(true)}>
+                  <div className="prompt-card" onClick={()=>setShowFF(true)}>
                     <div style={{fontSize:22}}>👥</div>
                     <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div><div style={{fontSize:11,color:"#454F56"}}>{friendLog.length} this year</div></div>
                     <div style={{fontSize:14,color:"#454F56"}}>+</div>
-                  </button>
+                  </div>
                   {showFF&&(
                     <div className="add-form">
                       <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>Who did you connect with?</div>
@@ -2456,43 +2312,6 @@ export default function App() {
                   <CheckGroup items={lists.annual||DEFAULT_LISTS.annual} state={annualState} onToggle={handleAnnual} bouncing={bouncing} travel={false}/>
                 </>
               )}
-            </>
-          )}
-
-          {/* ══ PLATFORM ═══════════════════════════════════════════════ */}
-          {tab==="progress"&&progressSubTab==="platform"&&(
-            <>
-              <div className="platform-hero" style={{marginTop:4}}>
-                <div style={{position:"relative",zIndex:1}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.16em",textTransform:"uppercase",color:"rgba(255,255,255,0.4)",marginBottom:4}}>Slow Burn</div>
-                  <div style={{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-0.03em",marginBottom:2}}>Platform Work</div>
-                  <div style={{fontSize:14,color:"rgba(255,255,255,0.45)",marginBottom:16}}>The books, the movement, the legacy.</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    {[{label:"Completed",val:`${platItems.filter(i=>platState[i.id]?.checked).length}/${platItems.length}`},{label:"Pts Available",val:`${platItems.reduce((s,i)=>s+i.xp,0)}`}].map(({label,val})=>(
-                      <div key={label} style={{background:"rgba(255,255,255,0.08)",borderRadius:6,padding:"10px 12px",border:"1px solid rgba(255,255,255,0.12)"}}>
-                        <div style={{fontSize:20,fontWeight:900,color:"#fff",letterSpacing:"-0.02em"}}>{val}</div>
-                        <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:2}}>{label}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="sec"><div className="sec-title">This Month</div><div className="sec-sub">Tap to log · pts awarded</div></div>
-              <CheckGroup items={platItems} state={platState} onToggle={handlePlat} bouncing={bouncing} travel={false}/>
-              <div className="sec"><div className="sec-title">Projects</div></div>
-              {[{title:"Recalibrated",sub:"Faith + leadership book",color:"#7C3AED",stage:"Writing"},{title:"The Sequence",sub:"Marketing book",color:"#35617E",stage:"Writing"},{title:"One Five One",sub:"Men's movement",color:"#0891B2",stage:"Building"},{title:"BenWebb.com",sub:"Unified platform",color:"#2B5F7D",stage:"Planning"}].map(p=>(
-                <div key={p.title} className="g-card" style={{borderLeft:`3px solid ${p.color}`,marginBottom:8}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div><div style={{fontSize:15,fontWeight:700,color:"#121A20"}}>{p.title}</div><div style={{fontSize:12,color:"#64748B",marginTop:2}}>{p.sub}</div></div>
-                    <div style={{fontSize:11,fontWeight:700,background:"rgba(255,255,255,0.05)",color:p.color,padding:"4px 10px",borderRadius:4,border:`1px solid ${p.color}30`}}>{p.stage}</div>
-                  </div>
-                </div>
-              ))}
-              <div className="quote-hero" style={{marginTop:16}}>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(255,255,255,0.35)",marginBottom:10}}>Core Thesis</div>
-                <div style={{fontSize:17,fontWeight:500,color:"#fff",lineHeight:1.55,fontStyle:"italic"}}>"Really chasing the Lord means great sacrifice but great outcomes — encouraging others to dream and live a life less ordinary."</div>
-                <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.3)",marginTop:12,letterSpacing:"0.08em",textTransform:"uppercase"}}>Ben Webb</div>
-              </div>
             </>
           )}
 
@@ -2525,7 +2344,7 @@ export default function App() {
                   <div style={{fontSize:12,color:"#94A3B8"}}>${financials.savingsCurrent.toLocaleString()} of ${financials.savingsTarget.toLocaleString()}</div>
                 </div>
               </div>
-              {!showFinForm&&<button type="button" className="prompt-card" onClick={()=>setShowFinForm(true)}><div style={{fontSize:22}}>✏️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.04em",textTransform:"uppercase"}}>Update numbers</div><div style={{fontSize:11,color:"#454F56"}}>Debt, savings, targets</div></div><div style={{fontSize:14,color:"#454F56"}}>›</div></button>}
+              {!showFinForm&&<div className="prompt-card" onClick={()=>setShowFinForm(true)}><div style={{fontSize:22}}>✏️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:"#2B5F7D",letterSpacing:"0.04em",textTransform:"uppercase"}}>Update numbers</div><div style={{fontSize:11,color:"#454F56"}}>Debt, savings, targets</div></div><div style={{fontSize:14,color:"#454F56"}}>›</div></div>}
               {showFinForm&&(
                 <div className="fin-edit">
                   <div style={{fontSize:16,fontWeight:700,color:"#121A20",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>Update Financials<button onClick={()=>setShowFinForm(false)} style={{background:"none",border:"none",color:"#94A3B8",fontSize:14,cursor:"pointer",fontWeight:600}}>Done</button></div>
@@ -2542,7 +2361,7 @@ export default function App() {
                 </div>
               )}
               <div className="sec"><div className="sec-title">Connections</div><div className="sec-sub">{friendLog.length} this year</div></div>
-              <button type="button" className="prompt-card" onClick={()=>setShowFF(true)}><div style={{fontSize:22}}>👥</div><div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div></div><div style={{fontSize:14,color:"#454F56"}}>+</div></button>
+              <div className="prompt-card" onClick={()=>setShowFF(true)}><div style={{fontSize:22}}>👥</div><div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"#2B5F7D"}}>Log a connection</div></div><div style={{fontSize:14,color:"#454F56"}}>+</div></div>
               {showFF&&(
                 <div className="add-form">
                   <div style={{fontSize:17,fontWeight:800,color:"#121A20",marginBottom:14}}>Who did you connect with?</div>
@@ -2597,10 +2416,10 @@ export default function App() {
                     ):(
                       <div key={t.id} className="trip-row">
                         <span style={{fontSize:22}}>✈️</span>
-                        <button type="button" aria-label={`Edit trip ${t.dest||""}`} style={{flex:1,cursor:"pointer",background:"none",border:"none",padding:0,textAlign:"left",font:"inherit"}} onClick={()=>startEditTrip(t)}>
+                        <div style={{flex:1,cursor:"pointer"}} onClick={()=>startEditTrip(t)}>
                           <div style={{fontSize:15,fontWeight:700,color:"#121A20"}}>{t.dest}</div>
                           <div style={{fontSize:12,color:"#94A3B8"}}>{formatShort(t.start)}</div>
-                        </button>
+                        </div>
                         <div style={{fontSize:11,fontWeight:700,background:"#E0F7FA",color:"#2B5F7D",padding:"3px 9px",borderRadius:100}}>{t.type||"IJM"}</div>
                         <button className="todo-del" onClick={()=>deleteTrip(t.id)}>×</button>
                       </div>
@@ -2610,20 +2429,8 @@ export default function App() {
               )}
               <div className="sec"><div className="sec-title">Stats</div></div>
               <div className="stat-card">
-                {[["Milestone streak",`${streaks.current} days`],["Longest milestone streak",`${streaks.longest} days`],["Momentum run",`${momentum.current} days`],["Days Complete",`${streaks.totalDays||0}`],["Sabbaths Honored",`${streaks.sabbaths||0}`],["Practice Sessions",`${streaks.practiceSessions||0}`],["Trips",`${tripLog.length}`],["Goals Done",`${goalsComplete}/${goals.length}`],["Total Points",`${totalXP}`]].map(([l,v])=>(
+                {[["Streak",`${streaks.current} days`],["Best Streak",`${streaks.longest} days`],["Days Complete",`${streaks.totalDays||0}`],["Sabbaths Honored",`${streaks.sabbaths||0}`],["Practice Sessions",`${streaks.practiceSessions||0}`],["Trips",`${tripLog.length}`],["Goals Done",`${goalsComplete}/${goals.length}`],["Total Points",`${totalXP}`]].map(([l,v])=>(
                   <div key={l} className="s-row"><div className="s-lbl">{l}</div><div className="s-val">{v}</div></div>
-                ))}
-              </div>
-              <div className="sec"><div className="sec-title">Milestone Journey</div><div className="sec-sub">Main streak</div></div>
-              <MilestoneJourney milestones={generateMilestoneList(420)} currentStreak={streaks.current}/>
-
-              <div className="sec"><div className="sec-title">Achievements</div></div>
-              <div className="ach-grid">
-                {ACHIEVEMENTS.map(a=>(
-                  <div key={a.id} className={`ach-card ${unlockedAch[a.id]?"unlocked":""}`}>
-                    <div className="ach-icon">{a.icon}</div>
-                    <div className="ach-name">{a.title}</div>
-                  </div>
                 ))}
               </div>
               <div className="sec"><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}><div className="sec-title">Goals</div><button className="sec-btn" onClick={()=>setShowAddGoal(p=>!p)}>{showAddGoal?"Cancel":"+ Add"}</button></div></div>
@@ -2686,6 +2493,69 @@ export default function App() {
                   </div>
                 );
               })}
+            </>
+          )}
+
+          {/* ══ JOURNEY ════════════════════════════════════════════════ */}
+          {tab==="journey"&&(
+            <>
+              <Journey daysKept={daysKept} level={journey} nodes={journeyNodes()}/>
+
+              <div className="sec" style={{marginTop:18}}>
+                <div className="sec-title">The Larger Arc</div>
+                <button onClick={cycleArc} style={{background:"none",border:"none",fontSize:11,fontWeight:800,color:"#2B5F7D",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>Another ›</button>
+              </div>
+              <div style={{fontSize:12,color:"#6E7F8A",lineHeight:1.55,marginBottom:10}}>
+                The multi-year work, one tickable step at a time. Progress is derived from the steps,
+                so it can never drift from what is actually done.
+              </div>
+              {surfacedArc && (
+                <>
+                  <div className="g-card" style={{borderLeft:`3px solid ${DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10}}>
+                      <div style={{fontSize:15,fontWeight:700,color:"#121A20",marginBottom:4}}>{surfacedArc.title}</div>
+                      <div style={{fontSize:10.5,fontWeight:800,color:"#94A3B8",whiteSpace:"nowrap"}}>{surfacedArcDone}/{(surfacedArc.steps||[]).length}</div>
+                    </div>
+                    <div style={{fontSize:12,color:"#64748B",marginBottom:12}}>{surfacedArc.detail}</div>
+                    <div style={{display:"grid",gap:2}}>
+                      {(surfacedArc.steps||[]).map(st=>(
+                        <button key={st.id} onClick={()=>toggleArcStep(surfacedArc.id,st.id)}
+                          style={{display:"flex",alignItems:"flex-start",gap:9,textAlign:"left",background:"none",border:"none",padding:"7px 0",cursor:"pointer",width:"100%"}}>
+                          <span style={{flexShrink:0,width:17,height:17,borderRadius:5,marginTop:1,
+                            border:st.done?"none":"1.5px solid #CBD5E1",
+                            background:st.done?(DOMAIN_CFG[surfacedArc.domain]?.color||"#2B5F7D"):"transparent",
+                            color:"#fff",fontSize:11,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{st.done?"✓":""}</span>
+                          <span style={{fontSize:13,lineHeight:1.45,color:st.done?"#94A3B8":"#334155",textDecoration:st.done?"line-through":"none"}}>{st.text}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {surfacedArcNext && (
+                      <div style={{marginTop:12,paddingTop:11,borderTop:"1px solid #E8EEF2",fontSize:11.5,color:"#17384A",lineHeight:1.5}}>
+                        <strong style={{fontWeight:800}}>Next:</strong> {surfacedArcNext.text}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="sec" style={{marginTop:18}}><div className="sec-title">Streak Milestones</div><div className="sec-sub">Main streak · {streaks.current} days</div></div>
+              <MilestoneJourney milestones={generateMilestoneList(420)} currentStreak={streaks.current}/>
+
+              <div className="sec" style={{marginTop:18}}><div className="sec-title">Achievements</div></div>
+              <div className="ach-grid">
+                {ACHIEVEMENTS.map(a=>(
+                  <div key={a.id} className={`ach-card ${unlockedAch[a.id]?"unlocked":""}`}>
+                    <div className="ach-icon">{a.icon}</div>
+                    <div className="ach-name">{a.title}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="quote-hero" style={{marginTop:18}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(255,255,255,0.35)",marginBottom:10}}>Where this is going</div>
+                <div style={{fontSize:17,fontWeight:500,color:"#fff",lineHeight:1.55,fontStyle:"italic"}}>"Really chasing the Lord means great sacrifice but great outcomes — encouraging others to dream and live a life less ordinary."</div>
+                <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.3)",marginTop:12,letterSpacing:"0.08em",textTransform:"uppercase"}}>Ben Webb</div>
+              </div>
             </>
           )}
 
@@ -2770,6 +2640,36 @@ export default function App() {
                       <div style={{fontSize:13,color:"#2C3A44",lineHeight:1.7}}>{visionAnchor}</div>
                     )}
                   </div>
+
+                  {/* PLATFORM — deliberately demoted. Still here, no longer a
+                      top-level destination. It is slow-burn work, so it sits
+                      under the week it has to fit inside. */}
+                  <div className="sec" style={{marginTop:20}}>
+                    <div className="sec-title">Platform</div>
+                    <button onClick={()=>setShowPlatform(v=>!v)} style={{marginLeft:"auto",background:"none",border:"none",fontSize:11,fontWeight:800,color:"#2B5F7D",cursor:"pointer",letterSpacing:"0.06em",textTransform:"uppercase"}}>{showPlatform?"Hide":"Open ›"}</button>
+                  </div>
+                  {!showPlatform&&(
+                    <button onClick={()=>setShowPlatform(true)} style={{display:"block",width:"100%",textAlign:"left",background:"#F5F7F8",border:"1px solid #D3DBE0",borderLeft:"3px solid #7A5C3E",borderRadius:12,padding:"12px 14px",marginBottom:12,cursor:"pointer"}}>
+                      <div style={{fontSize:12.5,color:"#454F56",lineHeight:1.5}}>
+                        The slow burn — the books and the site. <strong style={{color:"#17384A"}}>{platItems.filter(i=>platState[i.id]?.checked).length}/{platItems.length}</strong> logged this month.
+                      </div>
+                    </button>
+                  )}
+                  {showPlatform&&(
+                    <>
+                      <div style={{fontSize:12,color:"#6E7F8A",marginBottom:8,lineHeight:1.5}}>Tap to log. These are monthly, not daily — a thin month here is not a failure.</div>
+                      <CheckGroup items={platItems} state={platState} onToggle={handlePlat} bouncing={bouncing} travel={false}/>
+                      <div className="sec"><div className="sec-title">Projects</div></div>
+                      {[{title:"Recalibrated",sub:"Faith + leadership book",color:"#7C3AED",stage:"Writing"},{title:"The Sequence",sub:"Marketing book",color:"#35617E",stage:"Writing"},{title:"BenWebb.com",sub:"Unified platform",color:"#2B5F7D",stage:"Planning"}].map(pr=>(
+                        <div key={pr.title} className="g-card" style={{borderLeft:`3px solid ${pr.color}`,marginBottom:8}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                            <div><div style={{fontSize:15,fontWeight:700,color:"#121A20"}}>{pr.title}</div><div style={{fontSize:12,color:"#64748B",marginTop:2}}>{pr.sub}</div></div>
+                            <div style={{fontSize:11,fontWeight:700,background:"rgba(255,255,255,0.05)",color:pr.color,padding:"4px 10px",borderRadius:4,border:`1px solid ${pr.color}30`}}>{pr.stage}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </>
               )}
             </>
@@ -2828,7 +2728,7 @@ export default function App() {
                     <div style={{fontSize:12,color:"#94A3B8",fontStyle:"italic"}}>Let the answer be smaller than you think.</div>
                   </div>
                   <div className="sec"><div className="sec-title">Today's Reflection</div><div className="sec-sub">{new Date().toLocaleDateString("en-US",{weekday:"long"})}</div></div>
-                  <textarea className="journal-input" rows={8} placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"} value={journalInput} onChange={e=>onJournalChange(e.target.value)} onBlur={()=>flushJournal()} aria-label="Today's journal entry" style={{marginBottom:14}}/>
+                  <textarea className="journal-input" rows={8} placeholder={"What is God saying to you today?\n\nWhat are you grateful for?\n\nWhat do you need to surrender?"} value={journalInput} onChange={e=>saveJournalEntry(e.target.value)} style={{marginBottom:14}}/>
                   {Object.entries(journal).filter(([d,t])=>d!==today&&t&&t.trim()).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5).length>0&&(
                     <>
                       <div className="sec"><div className="sec-title">Recent</div></div>
@@ -2856,10 +2756,10 @@ export default function App() {
                       <div className="btn-row"><button className="btn-s" onClick={()=>setEditingValueIdx(null)}>Cancel</button><button className="btn-p" onClick={saveValue}>Save</button></div>
                     </div>
                   ):(
-                    <button type="button" className="tenet-row" key={v.n} aria-label={`Edit value: ${v.n}`} onClick={()=>startEditValue(i)} style={{cursor:"pointer",width:"100%",textAlign:"left",font:"inherit"}}>
+                    <div className="tenet-row" key={v.n} onClick={()=>startEditValue(i)} style={{cursor:"pointer"}}>
                       <div className="tenet-s">{v.n.slice(0,1)}</div>
                       <div><div style={{fontSize:15,fontWeight:700,color:"#121A20",marginBottom:2}}>{v.n}</div><div style={{fontSize:13,color:"#64748B",lineHeight:1.4}}>{v.d}</div></div>
-                    </button>
+                    </div>
                   )
                 ))}
               </div>
@@ -3055,6 +2955,7 @@ export default function App() {
         <div className="bottom-nav">
           {[
             {id:"today",lbl:"Today",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 15l2.5 2.5L16 13"/></svg>},
+            {id:"journey",lbl:"Journey",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M5 20c3-1 3-5 0-6s-3-5 0-6 8-1 11-1"/><circle cx="5" cy="20" r="1.6"/><circle cx="19" cy="7" r="1.6"/></svg>},
             {id:"progress",lbl:"Progress",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>},
             {id:"planner",lbl:"Plan",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 7h8M8 12h8M8 17h5"/></svg>},
             {id:"journal",lbl:"Journal",path:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>},

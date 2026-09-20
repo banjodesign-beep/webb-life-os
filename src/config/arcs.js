@@ -90,17 +90,6 @@ export const DEFAULT_ARCS = [
     ],
   },
   {
-    id: "g12", domain: "platform", title: "One Five One — first real cohort",
-    detail: "The men's movement. Individual invitations first.",
-    target: "2027",
-    steps: [
-      { id: "s1", text: "The premise written in one page" },
-      { id: "s2", text: "Format decided — cadence, size, commitment" },
-      { id: "s3", text: "First twelve men named" },
-      { id: "s4", text: "First gathering held" },
-    ],
-  },
-  {
     id: "g6", domain: "platform", title: "BenWebb.com live",
     detail: "One home for all three projects.",
     target: "Q2 2026",
@@ -197,6 +186,10 @@ export const DEFAULT_ARCS = [
     ],
   },
 ];
+
+// Arcs deliberately retired. Saved copies carrying these ids are dropped on
+// load rather than being treated as user-created custom arcs.
+export const RETIRED_ARC_IDS = ["g12"];
 
 // Progress is derived, never stored — so it can't drift from reality.
 export function arcProgress(arc) {
