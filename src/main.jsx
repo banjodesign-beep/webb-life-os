@@ -1,7 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
-import ReminderPrompt from './components/ReminderPrompt.jsx'
+import './app.css'
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
@@ -12,6 +12,5 @@ if ('serviceWorker' in navigator) {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
-    <ReminderPrompt />
   </React.StrictMode>
 )

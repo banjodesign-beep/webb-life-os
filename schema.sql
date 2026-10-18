@@ -1,5 +1,6 @@
--- Webb Life OS — Database Schema
--- Run this once in your Supabase SQL Editor
+-- Meridian database schema (v2.0)
+-- Run once in the Supabase SQL editor. v2.0 uses the same single table as v1;
+-- nothing needs to change for the upgrade.
 
 create table if not exists app_data (
   key text primary key,
@@ -7,10 +8,10 @@ create table if not exists app_data (
   updated_at timestamptz default now()
 );
 
--- Allow all access (single user, no auth required)
+-- Single user, no sign-in yet. Locking this to a user id needs sign-in and is
+-- planned for v2.1 so it is not bundled with the v2.0 rewrite.
 alter table app_data enable row level security;
 
-create policy "Allow all" on app_data
-  for all
-  using (true)
-  with check (true);
+do $$ begin
+  create policy "Allow all" on app_data for all using (true) with check (true);
+exception when duplicate_object then null; end $$;
