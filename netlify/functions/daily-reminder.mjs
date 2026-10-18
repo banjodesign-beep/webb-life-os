@@ -1,78 +1,103 @@
 // netlify/functions/daily-reminder.mjs
-// Sends one push a day reminding Ben to update Meridian.
-// Needs one new Netlify env var: VAPID_PRIVATE_KEY.
-// Reuses the existing VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
+// Runs every hour. Works out Ben's local time from the timezone his phone last
+// reported, and sends:
+//   - the evening nudge at nudgeHour (default 8pm), skipped if today is already kept
+//   - the Sunday insight at insightHour (default 7pm on Sundays)
+//   - an iCloud travel sync once a day at 3am local
+// Every run is logged to v2-push-log so Settings can show what happened.
+import { db, getRow, sendPush, logPush, localParts } from '../lib/core.mjs';
+import { syncTravel } from '../lib/travel.mjs';
 
-import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
-
-const VAPID_PUBLIC_KEY =
-  'BC4Shviauc16nf_lCh9jPVH9tsmlIwPuyCW9Q651kYBQYhCP_fruSBRuyzPnBjf1_zBEL4G_3DFgiM3vvOzJSuE';
-
-const MESSAGES = [
-  { title: 'Keystone check 🗝️', body: "Did today's keystone get done? Go claim it." },
-  { title: 'Momentum is listening', body: "It noticed you haven't checked in. Don't leave it hanging." },
-  { title: 'Tiny ritual, big arc', body: 'Two minutes in Meridian today, a better Journey tomorrow.' },
+const FUN = [
   { title: 'All aboard the 8pm Express 🚂', body: 'Next stop: the Today tab. Tickets are free. Streaks are not.' },
-  { title: 'Future Ben called', body: 'He says thanks in advance for logging today.' },
-  { title: 'Streak status: nervous', body: 'Your streak is pacing the hallway. Put it out of its misery.' },
+  { title: 'Future Ben called', body: 'He says thanks in advance for closing out today.' },
   { title: 'Port Stephens to Pikes Peak', body: 'Wherever today took you, it only counts once it is logged.' },
-  { title: 'The journal is open', body: "One honest sentence about today. That's the whole ask." },
   { title: 'Receipts, please 🧾', body: 'Today happened. Meridian would like proof.' },
-  { title: 'Quick lap before bed', body: 'Checklist, health, one line in the journal. Done.' },
   { title: 'Unlogged days are rumors', body: 'Make today official.' },
-  { title: 'Gentle nudge, firm love', body: 'Fill out Meridian. Then go be with your people.' },
+  { title: 'Gentle nudge, firm love', body: 'Close out Meridian. Then go be with your people.' },
   { title: 'Trans-Siberian of consistency 🚆', body: "9,289 km, one day at a time. Today's leg needs a stamp." },
-  { title: 'The Journey map is waiting', body: 'One more step on the trail, as soon as you log it.' },
-  { title: 'Scoreboard check', body: 'What won today? Write it down before it fades.' },
-  { title: 'Low effort, high return', body: 'Ninety seconds. Best ROI of your evening.' },
   { title: "G'day, legend 🦘", body: "Quick one before tea: how'd today go?" },
   { title: 'Close the loop', body: 'You planned the day. Now let the day report back.' },
   { title: 'Mission control to Ben 🛰️', body: 'Daily telemetry not received. Please transmit.' },
-  { title: 'Small wins still count', body: 'Even a messy day deserves a check-in.' },
+  { title: 'Ninety seconds', body: 'Best return on investment of your evening.' },
+  { title: 'The Ghan is boarding 🐪', body: 'Adelaide to Darwin takes 54 hours. Your checklist takes two minutes.' },
 ];
 
-// Scrambled rotation: all 20 appear once before any repeats (7 is coprime with 20).
-export function pickMessage(now = Date.now()) {
-  const day = Math.floor(now / 86_400_000);
-  return MESSAGES[(day * 7) % MESSAGES.length];
+export function pickFun(date) {
+  const n = Number(date.replace(/-/g, '')) || 0;
+  return FUN[(n * 7) % FUN.length];
 }
 
-export default async () => {
-  const { VAPID_PRIVATE_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY } = process.env;
-  if (!VAPID_PRIVATE_KEY || !VITE_SUPABASE_URL || !VITE_SUPABASE_ANON_KEY) {
-    console.error('Missing env var. Check VAPID_PRIVATE_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY.');
-    return new Response('missing env', { status: 500 });
+export function nudgeFor(status, date) {
+  const fresh = status && status.date === date;
+  if (fresh && (status.kept || status.protected)) return null; // nothing to nag about
+  const streak = (status && status.streak) || 0;
+  if (fresh && status.repairOpen) {
+    return { title: 'Yesterday can still be saved', body: `Finish yesterday's rhythm before midnight and day ${streak + 1} stays alive.` };
+  }
+  if (streak >= 2) {
+    const left = fresh && status.remaining ? `${status.remaining} item${status.remaining === 1 ? '' : 's'} left.` : "Today's rhythm isn't logged yet.";
+    return { title: `Day ${streak + 1} is on the line 🔥`, body: left };
+  }
+  return pickFun(date);
+}
+
+export async function runHour(sb, now = new Date()) {
+  const settings = (await getRow(sb, 'v2-settings')) || {};
+  const tz = settings.tz || 'America/Denver';
+  const nudgeHour = settings.nudgeHour ?? 20;
+  const insightHour = settings.insightHour ?? 19;
+  const local = localParts(tz, now);
+  const log = (await getRow(sb, 'v2-push-log')) || { sent: {} };
+  const sent = log.sent || {};
+  const results = [];
+
+  if (local.hour === 3 && !sent[`travel:${local.date}`]) {
+    const v = await syncTravel(sb, local.date);
+    await logPush(sb, { kind: 'travel-sync', ok: !v.error, error: v.error || null, sentKey: `travel:${local.date}` });
   }
 
-  webpush.setVapidDetails('https://benwebbos.netlify.app', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-  const supabase = createClient(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY);
-
-  const { data, error } = await supabase
-    .from('app_data')
-    .select('value')
-    .eq('key', 'push_sub')
-    .maybeSingle();
-
-  if (error || !data?.value) {
-    console.log('No push subscription saved yet.', error || '');
-    return new Response('no subscription', { status: 200 });
+  if (local.weekday === 'Sun' && local.hour === insightHour && !sent[`insight:${local.date}`]) {
+    const status = await getRow(sb, 'v2-status');
+    const opens = (await getRow(sb, 'v2-opens')) || {};
+    const streak = (status && status.streak) || 0;
+    const weekOpens = Object.keys(opens).filter((d) => d <= local.date && d > shift(local.date, -7)).length;
+    const res = await sendPush(sb, { title: 'Your week is in 📡', body: `Streak at ${streak}. Opened Meridian ${weekOpens} of 7 days. Tap for slipping, wins and your top 3.`, url: '/?review=1', tag: 'insight' });
+    await logPush(sb, { kind: 'insight', ...res, sentKey: res.ok ? `insight:${local.date}` : undefined });
+    results.push(res);
   }
 
-  const msg = pickMessage();
-  try {
-    await webpush.sendNotification(data.value, JSON.stringify({ ...msg, url: '/' }));
-    console.log('Sent:', msg.title);
-  } catch (err) {
-    if (err.statusCode === 404 || err.statusCode === 410) {
-      await supabase.from('app_data').delete().eq('key', 'push_sub');
-      console.log('Subscription expired and was removed. Open Meridian to re-enable.');
+  if (local.hour === nudgeHour && !sent[`nudge:${local.date}`]) {
+    const status = await getRow(sb, 'v2-status');
+    const msg = nudgeFor(status, local.date);
+    if (!msg) {
+      await logPush(sb, { kind: 'nudge', ok: true, skipped: 'today already kept', sentKey: `nudge:${local.date}` });
     } else {
-      console.error('Push failed', err.statusCode, err.body || err.message);
+      const res = await sendPush(sb, { ...msg, url: '/', tag: 'nudge' });
+      await logPush(sb, { kind: 'nudge', ...res, sentKey: res.ok ? `nudge:${local.date}` : undefined });
+      results.push(res);
     }
   }
-  return new Response('ok', { status: 200 });
+
+  if (!results.length && local.hour === 12) {
+    // A midday heartbeat proves the scheduler is running even on quiet days.
+    await logPush(sb, { kind: 'heartbeat', ok: true, local: `${local.date} ${local.hour}:00 ${tz}` });
+  }
+  return { local, results };
+}
+
+function shift(ds, n) { const d = new Date(ds + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+
+export default async () => {
+  try {
+    const sb = db();
+    const out = await runHour(sb);
+    return new Response(JSON.stringify(out), { status: 200 });
+  } catch (e) {
+    console.error('daily-reminder failed', e);
+    try { await logPush(db(), { kind: 'error', ok: false, error: e.message }); } catch { /* ignore */ }
+    return new Response('error', { status: 500 });
+  }
 };
 
-// 02:00 UTC = 8pm Mountain in summer (MDT), 7pm in winter (MST).
-export const config = { schedule: '0 2 * * *' };
+export const config = { schedule: '@hourly' };

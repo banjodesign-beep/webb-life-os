@@ -267,7 +267,7 @@ const ACHIEVEMENTS = [
   {id:"a9",icon:"🌍",title:"A Year Kept",check:s=>s.daysKept>=365},
 ];
 
-const APP_VERSION = "1.12";
+const APP_VERSION = "1.13";
 
 // ── CONFETTI + XP FLOAT ───────────────────────────────────────────────
 function Confetti() {

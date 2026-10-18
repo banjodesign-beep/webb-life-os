@@ -4,7 +4,9 @@ import App from './App.jsx'
 import ReminderPrompt from './components/ReminderPrompt.jsx'
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW register failed', e))
+  navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
+    .then((reg) => reg.update().catch(() => {}))
+    .catch((e) => console.warn('SW register failed', e))
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
